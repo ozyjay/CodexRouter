@@ -8,12 +8,6 @@
     "vscode": "^1.135.0"
   },
   "categories": ["AI", "Chat"],
-  "activationEvents": [
-    "onCommand:codexRouter.newRoutedTask",
-    "onCommand:codexRouter.routeSelection",
-    "onCommand:codexRouter.showDiagnostics",
-    "onChatParticipant:codex-router.router"
-  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
