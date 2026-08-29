@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.linkInstalledDependencies = linkInstalledDependencies;
+exports.runMutationCheck = runMutationCheck;
 const node_child_process_1 = require("node:child_process");
 const node_fs_1 = require("node:fs");
 const promises_1 = require("node:fs/promises");
@@ -60,6 +61,7 @@ async function runEvaluation(manifest, evaluationCase, strategy, ref, iteration)
         const validationExitCode = codexExitCode === 0 ? await runValidation(directory, evaluationCase) : null;
         const expectationPassed = codexExitCode === 0 ? await matchesExpectation(directory, evaluationCase) : null;
         const changedFiles = (await run("git", ["-C", directory, "diff", "--quiet"], { allowNonZero: true, suppressOutput: true })) !== 0;
+        const mutationKilled = codexExitCode === 0 && validationExitCode === 0 && expectationPassed !== false ? await runMutationCheck(directory, evaluationCase) : null;
         return {
             caseId: evaluationCase.id,
             iteration,
@@ -74,6 +76,7 @@ async function runEvaluation(manifest, evaluationCase, strategy, ref, iteration)
             codexExitCode,
             validationExitCode,
             expectationPassed,
+            mutationKilled,
             changedFiles,
             completedAt: new Date().toISOString(),
             failureKind: codexExitCode === 0 ? undefined : (0, evaluation_1.classifyCodexFailure)(codex.stderr, codexExitCode)
@@ -108,6 +111,30 @@ async function matchesExpectation(directory, evaluationCase) {
         return false;
     const diff = await runCapture("git", ["-C", directory, "diff", "--", evaluationCase.expectation.file]);
     return evaluationCase.expectation.requiredPatterns.every((pattern) => diff.includes(pattern));
+}
+async function runMutationCheck(directory, evaluationCase) {
+    if (!evaluationCase.mutation)
+        return null;
+    const target = (0, node_path_1.resolve)(directory, evaluationCase.mutation.file);
+    if ((0, node_path_1.relative)(directory, target).startsWith(".."))
+        return false;
+    let original;
+    try {
+        original = await node_fs_1.promises.readFile(target, "utf8");
+    }
+    catch {
+        return false;
+    }
+    if (!original.includes(evaluationCase.mutation.search))
+        return false;
+    const mutated = original.replace(evaluationCase.mutation.search, evaluationCase.mutation.replacement);
+    try {
+        await node_fs_1.promises.writeFile(target, mutated, "utf8");
+        return (await run(evaluationCase.mutation.validation.command, evaluationCase.mutation.validation.args, { cwd: directory, allowNonZero: true, suppressOutput: true })) !== 0;
+    }
+    finally {
+        await node_fs_1.promises.writeFile(target, original, "utf8");
+    }
 }
 async function runCodex(args) {
     return new Promise((resolvePromise, reject) => {

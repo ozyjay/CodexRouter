@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { CodexModel } from "../src/contracts";
 import { EvaluationManifest, buildPrompt, classifyCodexFailure, roleAgentFiles, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
-import { linkInstalledDependencies } from "../scripts/baseline-eval";
+import { linkInstalledDependencies, runMutationCheck } from "../scripts/baseline-eval";
 
 const manifest: EvaluationManifest = {
   version: 1,
@@ -16,7 +16,7 @@ const manifest: EvaluationManifest = {
     worker: { model: "terra", effort: "medium" },
     reviewer: { model: "sol", effort: "high" }
   },
-  cases: [{ id: "focused-test", prompt: "Add one test.", validation: { command: "npm", args: ["run", "check"] }, expectation: { file: "test/routing.test.ts", requiredPatterns: ["focused test"] } }]
+  cases: [{ id: "focused-test", prompt: "Add one test.", validation: { command: "npm", args: ["run", "check"] }, expectation: { file: "test/routing.test.ts", requiredPatterns: ["focused test"] }, mutation: { file: "src/routing.ts", search: "original", replacement: "mutant", validation: { command: process.execPath, args: ["-e", "process.exit(require('node:fs').readFileSync('src-routing.ts', 'utf8').includes('mutant') ? 1 : 0)"] } } }]
 };
 
 const models: CodexModel[] = [
@@ -44,12 +44,14 @@ test("fixed-role prompt and files remain sequential and role-scoped", () => {
 
 test("evaluation summary excludes prompts and aggregates verification", () => {
   const summary = summariseEvaluationRuns([
-    { caseId: "focused-test", iteration: 1, strategy: "single-model", allocations: { singleModel: manifest.singleModel }, durationMs: 100, codexExitCode: 0, validationExitCode: 0, expectationPassed: true, changedFiles: true, completedAt: "2026-08-29T00:00:00.000Z" },
-    { caseId: "focused-test", iteration: 1, strategy: "fixed-roles", allocations: manifest.fixedRoles, durationMs: 200, codexExitCode: 0, validationExitCode: 1, expectationPassed: false, changedFiles: true, completedAt: "2026-08-29T00:00:00.000Z" }
+    { caseId: "focused-test", iteration: 1, strategy: "single-model", allocations: { singleModel: manifest.singleModel }, durationMs: 100, codexExitCode: 0, validationExitCode: 0, expectationPassed: true, mutationKilled: true, changedFiles: true, completedAt: "2026-08-29T00:00:00.000Z" },
+    { caseId: "focused-test", iteration: 1, strategy: "fixed-roles", allocations: manifest.fixedRoles, durationMs: 200, codexExitCode: 0, validationExitCode: 1, expectationPassed: false, mutationKilled: false, changedFiles: true, completedAt: "2026-08-29T00:00:00.000Z" }
   ]);
   assert.equal(summary.totalRuns, 2);
   assert.equal(summary.validationPassedRuns, 1);
   assert.equal(summary.expectationPassedRuns, 1);
+  assert.equal(summary.mutationEvaluatedRuns, 2);
+  assert.equal(summary.mutationKilledRuns, 1);
   assert.equal(summary.verifiedRuns, 1);
   assert.equal(summary.byStrategy["single-model"].verified, 1);
   assert.equal(summary.byStrategy["fixed-roles"].expectationPassed, 0);
@@ -59,8 +61,21 @@ test("evaluation summary excludes prompts and aggregates verification", () => {
 
 test("evaluation manifest accepts only safe, meaningful diff expectations", () => {
   assert.deepEqual(validateEvaluationManifest(manifest), []);
-  const invalid = { ...manifest, cases: [{ ...manifest.cases[0], expectation: { file: "../secret", requiredPatterns: [] } }] };
-  assert.match(validateEvaluationManifest(invalid).join(" "), /expectation/);
+  const invalid = { ...manifest, cases: [{ ...manifest.cases[0], expectation: { file: "../secret", requiredPatterns: [] }, mutation: { file: "src/routing.ts", search: "", replacement: "", validation: { command: "npm", args: [] } } }] };
+  assert.match(validateEvaluationManifest(invalid).join(" "), /expectation.*mutation/);
+});
+
+test("mutation checks restore the candidate worktree after evaluating it", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-router-mutation-test-"));
+  const evaluationCase = manifest.cases[0];
+  try {
+    await writeFile(join(directory, "src-routing.ts"), "original", "utf8");
+    const mutation = { ...evaluationCase.mutation!, file: "src-routing.ts" };
+    assert.equal(await runMutationCheck(directory, { ...evaluationCase, mutation }), true);
+    assert.equal(await readFile(join(directory, "src-routing.ts"), "utf8"), "original");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("validation dependencies are linked only when requested", async () => {

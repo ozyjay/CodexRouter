@@ -25,11 +25,19 @@ export interface DiffExpectation {
   requiredPatterns: string[];
 }
 
+export interface MutationCheck {
+  file: string;
+  search: string;
+  replacement: string;
+  validation: ValidationCommand;
+}
+
 export interface EvaluationCase {
   id: string;
   prompt: string;
   validation: ValidationCommand;
   expectation?: DiffExpectation;
+  mutation?: MutationCheck;
 }
 
 export interface EvaluationManifest {
@@ -48,6 +56,7 @@ export interface EvaluationRunResult {
   codexExitCode: number | null;
   validationExitCode: number | null;
   expectationPassed: boolean | null;
+  mutationKilled: boolean | null;
   changedFiles: boolean;
   completedAt: string;
   failureKind?: EvaluationFailureKind;
@@ -58,10 +67,12 @@ export interface EvaluationSummary {
   completedRuns: number;
   validationPassedRuns: number;
   expectationPassedRuns: number;
+  mutationEvaluatedRuns: number;
+  mutationKilledRuns: number;
   verifiedRuns: number;
   changedRuns: number;
   averageDurationMs: number;
-  byStrategy: Record<EvaluationStrategy, { total: number; validationPassed: number; expectationPassed: number; verified: number; averageDurationMs: number }>;
+  byStrategy: Record<EvaluationStrategy, { total: number; validationPassed: number; expectationPassed: number; mutationEvaluated: number; mutationKilled: number; verified: number; averageDurationMs: number }>;
 }
 
 export function validateEvaluationManifest(value: unknown): string[] {
@@ -87,6 +98,7 @@ export function validateEvaluationManifest(value: unknown): string[] {
     if (typeof candidate.prompt !== "string" || candidate.prompt.trim().length === 0) errors.push(`cases[${index}] must have a task prompt.`);
     if (!isValidationCommand(candidate.validation)) errors.push(`cases[${index}] must have an executable validation command and argument array.`);
     if (candidate.expectation !== undefined && !isDiffExpectation(candidate.expectation)) errors.push(`cases[${index}] expectation must name a relative file and at least one required pattern.`);
+    if (candidate.mutation !== undefined && !isMutationCheck(candidate.mutation)) errors.push(`cases[${index}] mutation must name a relative file, a non-empty search string, a replacement, and a validation command.`);
   }
   return errors;
 }
@@ -122,13 +134,15 @@ export function roleAgentFiles(roles: FixedRoleAllocations): Record<string, stri
 
 export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): EvaluationSummary {
   const byStrategy: EvaluationSummary["byStrategy"] = {
-    "single-model": { total: 0, validationPassed: 0, expectationPassed: 0, verified: 0, averageDurationMs: 0 },
-    "fixed-roles": { total: 0, validationPassed: 0, expectationPassed: 0, verified: 0, averageDurationMs: 0 }
+    "single-model": { total: 0, validationPassed: 0, expectationPassed: 0, mutationEvaluated: 0, mutationKilled: 0, verified: 0, averageDurationMs: 0 },
+    "fixed-roles": { total: 0, validationPassed: 0, expectationPassed: 0, mutationEvaluated: 0, mutationKilled: 0, verified: 0, averageDurationMs: 0 }
   };
   let durationTotal = 0;
   let completedRuns = 0;
   let validationPassedRuns = 0;
   let expectationPassedRuns = 0;
+  let mutationEvaluatedRuns = 0;
+  let mutationKilledRuns = 0;
   let verifiedRuns = 0;
   let changedRuns = 0;
   for (const run of runs) {
@@ -145,7 +159,15 @@ export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): E
       expectationPassedRuns++;
       bucket.expectationPassed++;
     }
-    if (run.validationExitCode === 0 && run.expectationPassed !== false) {
+    if (run.mutationKilled !== null) {
+      mutationEvaluatedRuns++;
+      bucket.mutationEvaluated++;
+    }
+    if (run.mutationKilled === true) {
+      mutationKilledRuns++;
+      bucket.mutationKilled++;
+    }
+    if (run.validationExitCode === 0 && run.expectationPassed !== false && run.mutationKilled !== false) {
       verifiedRuns++;
       bucket.verified++;
     }
@@ -159,6 +181,8 @@ export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): E
     completedRuns,
     validationPassedRuns,
     expectationPassedRuns,
+    mutationEvaluatedRuns,
+    mutationKilledRuns,
     verifiedRuns,
     changedRuns,
     averageDurationMs: runs.length === 0 ? 0 : Math.round(durationTotal / runs.length),
@@ -203,11 +227,21 @@ function isValidationCommand(value: unknown): value is ValidationCommand {
 
 function isDiffExpectation(value: unknown): value is DiffExpectation {
   return isRecord(value)
-    && typeof value.file === "string"
-    && value.file.length > 0
-    && !value.file.startsWith("/")
-    && !value.file.split("/").includes("..")
+    && isSafeRelativeFile(value.file)
     && Array.isArray(value.requiredPatterns)
     && value.requiredPatterns.length > 0
     && value.requiredPatterns.every((pattern) => typeof pattern === "string" && pattern.length > 0);
+}
+
+function isMutationCheck(value: unknown): value is MutationCheck {
+  return isRecord(value)
+    && isSafeRelativeFile(value.file)
+    && typeof value.search === "string"
+    && value.search.length > 0
+    && typeof value.replacement === "string"
+    && isValidationCommand(value.validation);
+}
+
+function isSafeRelativeFile(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && !value.startsWith("/") && !value.split("/").includes("..");
 }

@@ -39,6 +39,15 @@
           "recommendedEffort, \"high\"",
           "risk, \"high\""
         ]
+      },
+      "mutation": {
+        "file": "src/routing.ts",
+        "search": "|delete|drop\\s+",
+        "replacement": "|drop\\s+",
+        "validation": {
+          "command": "npm",
+          "args": ["run", "check"]
+        }
       }
     }
   ]

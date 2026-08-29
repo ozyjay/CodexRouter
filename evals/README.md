@@ -2,7 +2,7 @@
 
 This harness compares a fixed single-model Codex turn with the same task run through fixed Explorer, Worker, and Reviewer roles. It is an evaluation utility, not part of the VS Code extension's normal routing flow.
 
-The manifest contains the evaluation prompts and therefore must be treated separately from Router telemetry. A case may include a local diff expectation: a relative file and required text patterns. The runner reads that diff only in the temporary worktree and records one boolean outcome. Generated reports contain only case IDs, model and effort allocations, durations, exit codes, whether a diff was produced, validation status, and expectation status. The per-strategy summary reports validation, expectation, and combined verified counts. Reports never contain task text, source code, Codex output, App Server traffic, or credentials.
+The manifest contains the evaluation prompts and therefore must be treated separately from Router telemetry. A case may include a local diff expectation: a relative file and required text patterns. It may also define a controlled mutation: the runner temporarily replaces one known source fragment, runs a validation command, and restores the original content. The runner records only whether that mutation was killed. Generated reports contain only case IDs, model and effort allocations, durations, exit codes, whether a diff was produced, validation, expectation, and mutation status. The per-strategy summary reports each gate and combined verified counts. Reports never contain task text, source code, Codex output, App Server traffic, or credentials.
 
 ## Configure
 

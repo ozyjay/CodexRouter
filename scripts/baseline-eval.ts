@@ -67,6 +67,7 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
     const validationExitCode = codexExitCode === 0 ? await runValidation(directory, evaluationCase) : null;
     const expectationPassed = codexExitCode === 0 ? await matchesExpectation(directory, evaluationCase) : null;
     const changedFiles = (await run("git", ["-C", directory, "diff", "--quiet"], { allowNonZero: true, suppressOutput: true })) !== 0;
+    const mutationKilled = codexExitCode === 0 && validationExitCode === 0 && expectationPassed !== false ? await runMutationCheck(directory, evaluationCase) : null;
     return {
       caseId: evaluationCase.id,
       iteration,
@@ -81,6 +82,7 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
       codexExitCode,
       validationExitCode,
       expectationPassed,
+      mutationKilled,
       changedFiles,
       completedAt: new Date().toISOString(),
       failureKind: codexExitCode === 0 ? undefined : classifyCodexFailure(codex.stderr, codexExitCode)
@@ -113,6 +115,26 @@ async function matchesExpectation(directory: string, evaluationCase: EvaluationC
   if (relative(directory, target).startsWith("..")) return false;
   const diff = await runCapture("git", ["-C", directory, "diff", "--", evaluationCase.expectation.file]);
   return evaluationCase.expectation.requiredPatterns.every((pattern) => diff.includes(pattern));
+}
+
+export async function runMutationCheck(directory: string, evaluationCase: EvaluationCase): Promise<boolean | null> {
+  if (!evaluationCase.mutation) return null;
+  const target = resolve(directory, evaluationCase.mutation.file);
+  if (relative(directory, target).startsWith("..")) return false;
+  let original: string;
+  try {
+    original = await fs.readFile(target, "utf8");
+  } catch {
+    return false;
+  }
+  if (!original.includes(evaluationCase.mutation.search)) return false;
+  const mutated = original.replace(evaluationCase.mutation.search, evaluationCase.mutation.replacement);
+  try {
+    await fs.writeFile(target, mutated, "utf8");
+    return (await run(evaluationCase.mutation.validation.command, evaluationCase.mutation.validation.args, { cwd: directory, allowNonZero: true, suppressOutput: true })) !== 0;
+  } finally {
+    await fs.writeFile(target, original, "utf8");
+  }
 }
 
 async function runCodex(args: string[]): Promise<{ exitCode: number; stderr: string }> {

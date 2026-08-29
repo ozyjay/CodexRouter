@@ -79,7 +79,7 @@ Evaluate the same representative task suite against:
 
 Measure verified completion, test/build success, repair turns, elapsed time, user overrides, under-routing, unnecessary over-routing, phase/subagent costs, and coordination overhead. Where available, record usage data through supported interfaces or correlate manually with Codex Local Meter; do not read another extension’s private state.
 
-Start with narrow tasks whose requested change, target test, and expected assertion are explicit. For each task, evaluate a privacy-safe boolean that the temporary-worktree diff contains the required evidence as well as the normal validation result. Run matched repeated trials for each strategy; a passing check without the requested evidence is not verified completion.
+Start with narrow tasks whose requested change, target test, and expected assertion are explicit. For each task, evaluate privacy-safe booleans that the temporary-worktree diff contains the required evidence, normal validation succeeds, and controlled fault injection is detected where the task adds a regression test. Run matched repeated trials for each strategy; a passing check without the requested evidence or a killed mutation is not verified completion.
 
 Prioritise avoiding under-routing on consequential work. A saving is not a success if verified quality regresses.
 
