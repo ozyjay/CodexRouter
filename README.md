@@ -76,6 +76,10 @@ Open this folder in VS Code and press `F5` to start an Extension Development Hos
 
 Use **Codex Router: Send Selection to Codex Router** from an editor selection to make that selected excerpt available to the local classifier and submitted task.
 
+### Debugging
+
+The repository includes a **Run Codex Router** launch configuration. Open `src/extension.ts`, set a breakpoint, and press `F5`. VS Code first runs `npm run compile`, then opens an Extension Development Host with this extension loaded. Trigger **Codex Router: New Routed Task** in that development window to stop at the breakpoint. Use the **npm: watch** task while actively editing to rebuild on save.
+
 ## Configuration
 
 | Setting | Default | Purpose |
