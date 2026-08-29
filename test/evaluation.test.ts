@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CodexModel } from "../src/contracts";
-import { EvaluationManifest, buildPrompt, roleAgentFiles, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
+import { EvaluationManifest, buildPrompt, classifyCodexFailure, roleAgentFiles, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
 
 const manifest: EvaluationManifest = {
   version: 1,
@@ -47,4 +47,10 @@ test("evaluation summary excludes prompts and aggregates verification", () => {
   assert.equal(summary.validationPassedRuns, 1);
   assert.equal(summary.averageDurationMs, 150);
   assert.equal(JSON.stringify(summary).includes("Add one test"), false);
+});
+
+test("Codex launcher failures are classified without retaining stderr", () => {
+  assert.equal(classifyCodexFailure("error: unexpected argument --approve-for-me", 2), "cli-configuration");
+  assert.equal(classifyCodexFailure("Please log in before continuing", 1), "authentication");
+  assert.equal(classifyCodexFailure("selected model is unavailable", 1), "model-allocation");
 });

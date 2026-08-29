@@ -1,6 +1,7 @@
 import { CodexModel, ReasoningEffort } from "./contracts";
 
 export type EvaluationStrategy = "single-model" | "fixed-roles";
+export type EvaluationFailureKind = "authentication" | "cli-configuration" | "model-allocation" | "worktree" | "startup-or-runtime";
 
 export interface Allocation {
   model: string;
@@ -41,6 +42,7 @@ export interface EvaluationRunResult {
   validationExitCode: number | null;
   changedFiles: boolean;
   completedAt: string;
+  failureKind?: EvaluationFailureKind;
 }
 
 export interface EvaluationSummary {
@@ -139,6 +141,15 @@ export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): E
     averageDurationMs: runs.length === 0 ? 0 : Math.round(durationTotal / runs.length),
     byStrategy
   };
+}
+
+export function classifyCodexFailure(stderr: string, exitCode: number): EvaluationFailureKind {
+  const value = stderr.toLowerCase();
+  if (/auth|log\s*in|sign\s*in/.test(value)) return "authentication";
+  if (/unknown argument|unexpected argument|invalid value|config(uration)?/.test(value) || exitCode === 2) return "cli-configuration";
+  if (/model.*(unavailable|unsupported|not found)|unsupported.*model/.test(value)) return "model-allocation";
+  if (/worktree|git repository|not a repository/.test(value)) return "worktree";
+  return "startup-or-runtime";
 }
 
 function allAllocations(manifest: EvaluationManifest): Record<string, Allocation> {
