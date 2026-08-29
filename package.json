@@ -1,0 +1,87 @@
+{
+  "name": "codex-router",
+  "displayName": "Codex Router",
+  "description": "Local, privacy-preserving routing for ChatGPT-authenticated Codex tasks.",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "vscode": "^1.135.0"
+  },
+  "categories": ["AI", "Chat"],
+  "activationEvents": [
+    "onCommand:codexRouter.newRoutedTask",
+    "onCommand:codexRouter.routeSelection"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codexRouter.newRoutedTask",
+        "title": "New Routed Task",
+        "category": "Codex Router"
+      },
+      {
+        "command": "codexRouter.routeSelection",
+        "title": "Send Selection to Codex Router",
+        "category": "Codex Router"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "codexRouter.routeSelection",
+          "group": "codexRouter",
+          "when": "editorHasSelection"
+        }
+      ]
+    },
+    "chatParticipants": [
+      {
+        "id": "codex-router.router",
+        "name": "router",
+        "fullName": "Codex Router",
+        "description": "Route a task to the appropriate Codex model and reasoning effort",
+        "isSticky": true
+      }
+    ],
+    "configuration": {
+      "title": "Codex Router",
+      "properties": {
+        "codexRouter.modelDeck.baseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8600/v1",
+          "description": "Loopback OpenAI-compatible ModelDeck endpoint used for local routing."
+        },
+        "codexRouter.modelDeck.routerModel": {
+          "type": "string",
+          "default": "",
+          "description": "Optional ModelDeck model ID used for routing. Leave empty to select the first ready local model."
+        },
+        "codexRouter.requestTimeoutMs": {
+          "type": "number",
+          "default": 15000,
+          "minimum": 1000,
+          "maximum": 120000,
+          "description": "Maximum time to wait for a local routing-model response."
+        },
+        "codexRouter.analytics.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Store privacy-preserving, local routing outcome records for evaluation."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "test": "tsx --test test/**/*.test.ts",
+    "check": "npm run compile && npm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/vscode": "^1.134.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  }
+}
