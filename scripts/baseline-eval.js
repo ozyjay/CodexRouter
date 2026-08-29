@@ -52,23 +52,40 @@ async function runEvaluation(manifest, evaluationCase, strategy, ref) {
         }
         const allocation = strategy === "single-model" ? manifest.singleModel : manifest.fixedRoles.parent;
         const startedAt = Date.now();
-        const codexExitCode = await run("codex", ["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", "--approve-for-me", (0, evaluation_1.buildPrompt)(strategy, evaluationCase)], { suppressOutput: true });
+        const codex = await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", (0, evaluation_1.buildPrompt)(strategy, evaluationCase)]);
+        const codexExitCode = codex.exitCode;
         const validationExitCode = codexExitCode === 0 ? await run(evaluationCase.validation.command, evaluationCase.validation.args, { cwd: directory, suppressOutput: true }) : null;
         const changedFiles = (await run("git", ["-C", directory, "diff", "--quiet"], { allowNonZero: true, suppressOutput: true })) !== 0;
         return {
             caseId: evaluationCase.id,
             strategy,
-            allocations: strategy === "single-model" ? { singleModel: manifest.singleModel } : manifest.fixedRoles,
+            allocations: strategy === "single-model" ? { singleModel: manifest.singleModel } : {
+                parent: manifest.fixedRoles.parent,
+                explorer: manifest.fixedRoles.explorer,
+                worker: manifest.fixedRoles.worker,
+                reviewer: manifest.fixedRoles.reviewer
+            },
             durationMs: Date.now() - startedAt,
             codexExitCode,
             validationExitCode,
             changedFiles,
-            completedAt: new Date().toISOString()
+            completedAt: new Date().toISOString(),
+            failureKind: codexExitCode === 0 ? undefined : (0, evaluation_1.classifyCodexFailure)(codex.stderr, codexExitCode)
         };
     }
     finally {
         await run("git", ["worktree", "remove", "--force", directory], { allowNonZero: true, suppressOutput: true });
     }
+}
+async function runCodex(args) {
+    return new Promise((resolvePromise, reject) => {
+        const child = (0, node_child_process_1.spawn)("codex", args, { shell: false, stdio: ["ignore", "ignore", "pipe"] });
+        let stderr = "";
+        child.stderr?.setEncoding("utf8");
+        child.stderr?.on("data", (chunk) => { stderr = `${stderr}${chunk}`.slice(-4096); });
+        child.on("error", reject);
+        child.on("exit", (code) => resolvePromise({ exitCode: code ?? 1, stderr }));
+    });
 }
 async function readManifest(path) {
     const content = await node_fs_1.promises.readFile(path, "utf8");

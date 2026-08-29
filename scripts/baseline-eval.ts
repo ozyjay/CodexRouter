@@ -59,7 +59,7 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
     }
     const allocation = strategy === "single-model" ? manifest.singleModel : manifest.fixedRoles.parent;
     const startedAt = Date.now();
-    const codex = await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", "--approve-for-me", buildPrompt(strategy, evaluationCase)]);
+    const codex = await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", buildPrompt(strategy, evaluationCase)]);
     const codexExitCode = codex.exitCode;
     const validationExitCode = codexExitCode === 0 ? await run(evaluationCase.validation.command, evaluationCase.validation.args, { cwd: directory, suppressOutput: true }) : null;
     const changedFiles = (await run("git", ["-C", directory, "diff", "--quiet"], { allowNonZero: true, suppressOutput: true })) !== 0;
