@@ -139,3 +139,5 @@ This starts a real Codex turn and consumes the user’s ChatGPT Codex allowance:
 - The `@router` entry point depends on the host enabling VS Code’s public Chat Participant API. The command entry point is always available.
 
 Future work should add an evaluation view/export, user success ratings, observed build/test results, and an opt-in contextual-bandit policy trained only from the local metadata contract.
+
+For the proposed independent-extension UX, production architecture, staged delivery plan, and non-goals, see [Production direction](docs/PRODUCTION_DIRECTION.md). For the phase-aware orchestration baseline and adaptive-routing evaluation design, see [Adaptive orchestration proposal](docs/ADAPTIVE_ORCHESTRATION_PROPOSAL.md).
