@@ -10,6 +10,30 @@ The research question is:
 
 > Can local routing and evidence-based allocation reduce latency and ChatGPT Codex usage while preserving verified software-engineering quality, compared with fixed models and Codex-native role configuration?
 
+## Local routing-provider choice
+
+The local model that classifies a task must be independently selectable from the Codex model that executes the approved task. ModelDeck is the initial provider, but the routing boundary should support a generic local OpenAI-compatible provider, with named presets for ModelDeck, Ollama, and LM Studio.
+
+```text
+Routing provider: ModelDeck | Ollama | LM Studio | deterministic fallback
+                                      ↓
+                    validated recommendation and user approval
+                                      ↓
+Execution backend: Codex App Server using existing ChatGPT authentication
+```
+
+This is not a proposal to make Ollama, LM Studio, or ModelDeck execute Codex turns. Codex App Server remains the sole execution backend and its live model catalogue remains authoritative for selectable Codex models and reasoning efforts.
+
+Each provider integration must:
+
+- use a literal loopback HTTP(S) endpoint only;
+- discover or explicitly configure its local classifier model without assuming provider-specific model identifiers;
+- use a compact, schema-constrained prompt and strictly validate the returned recommendation;
+- enforce bounded timeouts and show the active provider and any failure clearly; and
+- fall back to deterministic local rules without any cloud-routing request.
+
+Implement the generic OpenAI-compatible provider before provider-specific adapters. A native adapter is justified only where an OpenAI-compatible endpoint cannot provide the required discovery, structured-output, or reliability behaviour.
+
 ## Design principle
 
 Codex Router must first establish what existing Codex configuration can already achieve. Adaptive routing is valuable only when it outperforms a reproducible fixed-role baseline, not merely when it uses multiple models or subagents.
@@ -40,7 +64,7 @@ The provisional roles are experimental defaults, not hard-coded product rules:
 | Worker | Bounded implementation and ordinary debugging | Terra, medium |
 | Reviewer | Correctness, security, and test-gap review | Sol, high |
 
-Document how to invoke this baseline through Codex CLI and, where supported, through Codex’s normal client. The baseline must work without the Codex Router extension or ModelDeck.
+Document how to invoke this baseline through Codex CLI and, where supported, through Codex’s normal client. The baseline must work without the Codex Router extension or any local routing provider.
 
 ## Required comparisons
 
@@ -50,7 +74,7 @@ Evaluate the same representative task suite against:
 2. user-selected model and effort;
 3. fixed Explorer/Worker/Reviewer roles;
 4. deterministic routing rules;
-5. ModelDeck local-model recommendations;
+5. each enabled local routing provider's recommendations;
 6. later phase-aware adaptive routing.
 
 Measure verified completion, test/build success, repair turns, elapsed time, user overrides, under-routing, unnecessary over-routing, phase/subagent costs, and coordination overhead. Where available, record usage data through supported interfaces or correlate manually with Codex Local Meter; do not read another extension’s private state.
@@ -131,13 +155,14 @@ No outcome record may contain task text, source code, complete generated output,
 2. Record confirmed model selection, effort, multi-step, and delegation behaviour.
 3. Create and validate the fixed custom-agent baseline.
 4. Define repeatable evaluation tasks and verified success measures.
-5. Implement a deterministic advisory router without ModelDeck.
+5. Implement a deterministic advisory router without a local routing provider.
 6. Compare fixed single-model, user-selected, fixed-role, and deterministic baselines.
-7. Add ModelDeck’s local structured classifier.
-8. Add App Server submission and per-turn override flow.
-9. Add phase-aware routing and subagent assignment only where the supported interface is confirmed.
-10. Add outcome attribution and adaptive recommendations.
-11. Consider automatic routing only after advisory recommendations are demonstrably reliable.
+7. Add the generic local OpenAI-compatible structured classifier, initially configured for ModelDeck.
+8. Add and evaluate Ollama and LM Studio presets, retaining only providers that meet the same privacy and reliability contract.
+9. Add App Server submission and per-turn override flow.
+10. Add phase-aware routing and subagent assignment only where the supported interface is confirmed.
+11. Add outcome attribution and adaptive recommendations.
+12. Consider automatic routing only after advisory recommendations are demonstrably reliable.
 
 ## Updated success criterion
 
