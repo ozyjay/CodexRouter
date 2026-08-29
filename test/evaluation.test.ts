@@ -53,7 +53,11 @@ test("evaluation summary excludes prompts and aggregates verification", () => {
   assert.equal(summary.mutationEvaluatedRuns, 2);
   assert.equal(summary.mutationKilledRuns, 1);
   assert.equal(summary.verifiedRuns, 1);
+  assert.equal(summary.averageVerifiedDurationMs, 100);
+  assert.equal(summary.costPerVerifiedRunMs, 300);
   assert.equal(summary.byStrategy["single-model"].verified, 1);
+  assert.equal(summary.byStrategy["single-model"].averageVerifiedDurationMs, 100);
+  assert.equal(summary.byStrategy["fixed-roles"].costPerVerifiedRunMs, null);
   assert.equal(summary.byStrategy["fixed-roles"].expectationPassed, 0);
   assert.equal(summary.averageDurationMs, 150);
   assert.equal(JSON.stringify(summary).includes("Add one test"), false);

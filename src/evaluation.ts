@@ -72,7 +72,9 @@ export interface EvaluationSummary {
   verifiedRuns: number;
   changedRuns: number;
   averageDurationMs: number;
-  byStrategy: Record<EvaluationStrategy, { total: number; validationPassed: number; expectationPassed: number; mutationEvaluated: number; mutationKilled: number; verified: number; averageDurationMs: number }>;
+  averageVerifiedDurationMs: number | null;
+  costPerVerifiedRunMs: number | null;
+  byStrategy: Record<EvaluationStrategy, { total: number; validationPassed: number; expectationPassed: number; mutationEvaluated: number; mutationKilled: number; verified: number; averageDurationMs: number; averageVerifiedDurationMs: number | null; costPerVerifiedRunMs: number | null }>;
 }
 
 export function validateEvaluationManifest(value: unknown): string[] {
@@ -134,9 +136,11 @@ export function roleAgentFiles(roles: FixedRoleAllocations): Record<string, stri
 
 export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): EvaluationSummary {
   const byStrategy: EvaluationSummary["byStrategy"] = {
-    "single-model": { total: 0, validationPassed: 0, expectationPassed: 0, mutationEvaluated: 0, mutationKilled: 0, verified: 0, averageDurationMs: 0 },
-    "fixed-roles": { total: 0, validationPassed: 0, expectationPassed: 0, mutationEvaluated: 0, mutationKilled: 0, verified: 0, averageDurationMs: 0 }
+    "single-model": { total: 0, validationPassed: 0, expectationPassed: 0, mutationEvaluated: 0, mutationKilled: 0, verified: 0, averageDurationMs: 0, averageVerifiedDurationMs: null, costPerVerifiedRunMs: null },
+    "fixed-roles": { total: 0, validationPassed: 0, expectationPassed: 0, mutationEvaluated: 0, mutationKilled: 0, verified: 0, averageDurationMs: 0, averageVerifiedDurationMs: null, costPerVerifiedRunMs: null }
   };
+  const durationTotals: Record<EvaluationStrategy, number> = { "single-model": 0, "fixed-roles": 0 };
+  const verifiedDurationTotals: Record<EvaluationStrategy, number> = { "single-model": 0, "fixed-roles": 0 };
   let durationTotal = 0;
   let completedRuns = 0;
   let validationPassedRuns = 0;
@@ -149,6 +153,7 @@ export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): E
     const bucket = byStrategy[run.strategy];
     bucket.total++;
     bucket.averageDurationMs += run.durationMs;
+    durationTotals[run.strategy] += run.durationMs;
     durationTotal += run.durationMs;
     if (run.codexExitCode === 0) completedRuns++;
     if (run.validationExitCode === 0) {
@@ -170,11 +175,17 @@ export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): E
     if (run.validationExitCode === 0 && run.expectationPassed !== false && run.mutationKilled !== false) {
       verifiedRuns++;
       bucket.verified++;
+      verifiedDurationTotals[run.strategy] += run.durationMs;
     }
     if (run.changedFiles) changedRuns++;
   }
   for (const bucket of Object.values(byStrategy)) {
     bucket.averageDurationMs = bucket.total === 0 ? 0 : Math.round(bucket.averageDurationMs / bucket.total);
+  }
+  for (const strategy of ["single-model", "fixed-roles"] as const) {
+    const bucket = byStrategy[strategy];
+    bucket.averageVerifiedDurationMs = bucket.verified === 0 ? null : Math.round(verifiedDurationTotals[strategy] / bucket.verified);
+    bucket.costPerVerifiedRunMs = bucket.verified === 0 ? null : Math.round(durationTotals[strategy] / bucket.verified);
   }
   return {
     totalRuns: runs.length,
@@ -186,6 +197,8 @@ export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): E
     verifiedRuns,
     changedRuns,
     averageDurationMs: runs.length === 0 ? 0 : Math.round(durationTotal / runs.length),
+    averageVerifiedDurationMs: verifiedRuns === 0 ? null : Math.round(Object.values(verifiedDurationTotals).reduce((total, duration) => total + duration, 0) / verifiedRuns),
+    costPerVerifiedRunMs: verifiedRuns === 0 ? null : Math.round(durationTotal / verifiedRuns),
     byStrategy
   };
 }
