@@ -20,10 +20,16 @@ export interface ValidationCommand {
   args: string[];
 }
 
+export interface DiffExpectation {
+  file: string;
+  requiredPatterns: string[];
+}
+
 export interface EvaluationCase {
   id: string;
   prompt: string;
   validation: ValidationCommand;
+  expectation?: DiffExpectation;
 }
 
 export interface EvaluationManifest {
@@ -35,11 +41,13 @@ export interface EvaluationManifest {
 
 export interface EvaluationRunResult {
   caseId: string;
+  iteration: number;
   strategy: EvaluationStrategy;
   allocations: Record<string, Allocation>;
   durationMs: number;
   codexExitCode: number | null;
   validationExitCode: number | null;
+  expectationPassed: boolean | null;
   changedFiles: boolean;
   completedAt: string;
   failureKind?: EvaluationFailureKind;
@@ -49,9 +57,11 @@ export interface EvaluationSummary {
   totalRuns: number;
   completedRuns: number;
   validationPassedRuns: number;
+  expectationPassedRuns: number;
+  verifiedRuns: number;
   changedRuns: number;
   averageDurationMs: number;
-  byStrategy: Record<EvaluationStrategy, { total: number; validationPassed: number; averageDurationMs: number }>;
+  byStrategy: Record<EvaluationStrategy, { total: number; validationPassed: number; expectationPassed: number; verified: number; averageDurationMs: number }>;
 }
 
 export function validateEvaluationManifest(value: unknown): string[] {
@@ -76,6 +86,7 @@ export function validateEvaluationManifest(value: unknown): string[] {
     ids.add(candidate.id);
     if (typeof candidate.prompt !== "string" || candidate.prompt.trim().length === 0) errors.push(`cases[${index}] must have a task prompt.`);
     if (!isValidationCommand(candidate.validation)) errors.push(`cases[${index}] must have an executable validation command and argument array.`);
+    if (candidate.expectation !== undefined && !isDiffExpectation(candidate.expectation)) errors.push(`cases[${index}] expectation must name a relative file and at least one required pattern.`);
   }
   return errors;
 }
@@ -111,12 +122,14 @@ export function roleAgentFiles(roles: FixedRoleAllocations): Record<string, stri
 
 export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): EvaluationSummary {
   const byStrategy: EvaluationSummary["byStrategy"] = {
-    "single-model": { total: 0, validationPassed: 0, averageDurationMs: 0 },
-    "fixed-roles": { total: 0, validationPassed: 0, averageDurationMs: 0 }
+    "single-model": { total: 0, validationPassed: 0, expectationPassed: 0, verified: 0, averageDurationMs: 0 },
+    "fixed-roles": { total: 0, validationPassed: 0, expectationPassed: 0, verified: 0, averageDurationMs: 0 }
   };
   let durationTotal = 0;
   let completedRuns = 0;
   let validationPassedRuns = 0;
+  let expectationPassedRuns = 0;
+  let verifiedRuns = 0;
   let changedRuns = 0;
   for (const run of runs) {
     const bucket = byStrategy[run.strategy];
@@ -128,6 +141,14 @@ export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): E
       validationPassedRuns++;
       bucket.validationPassed++;
     }
+    if (run.expectationPassed === true) {
+      expectationPassedRuns++;
+      bucket.expectationPassed++;
+    }
+    if (run.validationExitCode === 0 && run.expectationPassed !== false) {
+      verifiedRuns++;
+      bucket.verified++;
+    }
     if (run.changedFiles) changedRuns++;
   }
   for (const bucket of Object.values(byStrategy)) {
@@ -137,6 +158,8 @@ export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): E
     totalRuns: runs.length,
     completedRuns,
     validationPassedRuns,
+    expectationPassedRuns,
+    verifiedRuns,
     changedRuns,
     averageDurationMs: runs.length === 0 ? 0 : Math.round(durationTotal / runs.length),
     byStrategy
@@ -176,4 +199,15 @@ function isAllocation(value: unknown): value is Allocation {
 
 function isValidationCommand(value: unknown): value is ValidationCommand {
   return isRecord(value) && typeof value.command === "string" && value.command.length > 0 && Array.isArray(value.args) && value.args.every((argument) => typeof argument === "string");
+}
+
+function isDiffExpectation(value: unknown): value is DiffExpectation {
+  return isRecord(value)
+    && typeof value.file === "string"
+    && value.file.length > 0
+    && !value.file.startsWith("/")
+    && !value.file.split("/").includes("..")
+    && Array.isArray(value.requiredPatterns)
+    && value.requiredPatterns.length > 0
+    && value.requiredPatterns.every((pattern) => typeof pattern === "string" && pattern.length > 0);
 }

@@ -12,7 +12,7 @@ const manifest: EvaluationManifest = {
     worker: { model: "terra", effort: "medium" },
     reviewer: { model: "sol", effort: "high" }
   },
-  cases: [{ id: "focused-test", prompt: "Add one test.", validation: { command: "npm", args: ["run", "check"] } }]
+  cases: [{ id: "focused-test", prompt: "Add one test.", validation: { command: "npm", args: ["run", "check"] }, expectation: { file: "test/routing.test.ts", requiredPatterns: ["focused test"] } }]
 };
 
 const models: CodexModel[] = [
@@ -40,13 +40,23 @@ test("fixed-role prompt and files remain sequential and role-scoped", () => {
 
 test("evaluation summary excludes prompts and aggregates verification", () => {
   const summary = summariseEvaluationRuns([
-    { caseId: "focused-test", strategy: "single-model", allocations: { singleModel: manifest.singleModel }, durationMs: 100, codexExitCode: 0, validationExitCode: 0, changedFiles: true, completedAt: "2026-08-29T00:00:00.000Z" },
-    { caseId: "focused-test", strategy: "fixed-roles", allocations: manifest.fixedRoles, durationMs: 200, codexExitCode: 0, validationExitCode: 1, changedFiles: true, completedAt: "2026-08-29T00:00:00.000Z" }
+    { caseId: "focused-test", iteration: 1, strategy: "single-model", allocations: { singleModel: manifest.singleModel }, durationMs: 100, codexExitCode: 0, validationExitCode: 0, expectationPassed: true, changedFiles: true, completedAt: "2026-08-29T00:00:00.000Z" },
+    { caseId: "focused-test", iteration: 1, strategy: "fixed-roles", allocations: manifest.fixedRoles, durationMs: 200, codexExitCode: 0, validationExitCode: 1, expectationPassed: false, changedFiles: true, completedAt: "2026-08-29T00:00:00.000Z" }
   ]);
   assert.equal(summary.totalRuns, 2);
   assert.equal(summary.validationPassedRuns, 1);
+  assert.equal(summary.expectationPassedRuns, 1);
+  assert.equal(summary.verifiedRuns, 1);
+  assert.equal(summary.byStrategy["single-model"].verified, 1);
+  assert.equal(summary.byStrategy["fixed-roles"].expectationPassed, 0);
   assert.equal(summary.averageDurationMs, 150);
   assert.equal(JSON.stringify(summary).includes("Add one test"), false);
+});
+
+test("evaluation manifest accepts only safe, meaningful diff expectations", () => {
+  assert.deepEqual(validateEvaluationManifest(manifest), []);
+  const invalid = { ...manifest, cases: [{ ...manifest.cases[0], expectation: { file: "../secret", requiredPatterns: [] } }] };
+  assert.match(validateEvaluationManifest(invalid).join(" "), /expectation/);
 });
 
 test("Codex launcher failures are classified without retaining stderr", () => {

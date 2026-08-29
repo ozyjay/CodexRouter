@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { CodexAppServer, isChatGPTAuthentication } from "../src/appServer";
 import { EvaluationCase, EvaluationManifest, EvaluationRunResult, EvaluationStrategy, buildPrompt, classifyCodexFailure, roleAgentFiles, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
 
@@ -12,6 +12,7 @@ interface Options {
   resultsDirectory: string;
   ref: string;
   caseId?: string;
+  iterations: number;
 }
 
 async function main(): Promise<void> {
@@ -21,7 +22,7 @@ async function main(): Promise<void> {
   if (options.caseId && selectedCases.length === 0) throw new Error(`No evaluation case exists with ID ${options.caseId}.`);
 
   if (!options.live) {
-    process.stdout.write(`${JSON.stringify({ mode: "dry-run", cases: selectedCases.map((evaluationCase) => evaluationCase.id), strategies: ["single-model", "fixed-roles"], message: "No Codex turn, validation command, worktree, or result file was created. Re-run with --live to consume Codex allowance." }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ mode: "dry-run", cases: selectedCases.map((evaluationCase) => evaluationCase.id), strategies: ["single-model", "fixed-roles"], iterations: options.iterations, plannedRuns: selectedCases.length * 2 * options.iterations, message: "No Codex turn, validation command, worktree, or result file was created. Re-run with --live to consume Codex allowance." }, null, 2)}\n`);
     return;
   }
 
@@ -37,8 +38,10 @@ async function main(): Promise<void> {
 
   const runs: EvaluationRunResult[] = [];
   for (const evaluationCase of selectedCases) {
-    for (const strategy of ["single-model", "fixed-roles"] as const) {
-      runs.push(await runEvaluation(manifest, evaluationCase, strategy, options.ref));
+    for (let iteration = 1; iteration <= options.iterations; iteration++) {
+      for (const strategy of ["single-model", "fixed-roles"] as const) {
+        runs.push(await runEvaluation(manifest, evaluationCase, strategy, options.ref, iteration));
+      }
     }
   }
   const report = { version: 1, generatedAt: new Date().toISOString(), ref: options.ref, runs, summary: summariseEvaluationRuns(runs) };
@@ -48,7 +51,7 @@ async function main(): Promise<void> {
   process.stdout.write(`${JSON.stringify({ resultPath, summary: report.summary }, null, 2)}\n`);
 }
 
-async function runEvaluation(manifest: EvaluationManifest, evaluationCase: EvaluationCase, strategy: EvaluationStrategy, ref: string): Promise<EvaluationRunResult> {
+async function runEvaluation(manifest: EvaluationManifest, evaluationCase: EvaluationCase, strategy: EvaluationStrategy, ref: string, iteration: number): Promise<EvaluationRunResult> {
   const directory = await mkdtemp(join(tmpdir(), "codex-router-baseline-"));
   try {
     await run("git", ["worktree", "add", "--detach", directory, ref]);
@@ -62,9 +65,11 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
     const codex = await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", buildPrompt(strategy, evaluationCase)]);
     const codexExitCode = codex.exitCode;
     const validationExitCode = codexExitCode === 0 ? await run(evaluationCase.validation.command, evaluationCase.validation.args, { cwd: directory, allowNonZero: true, suppressOutput: true }) : null;
+    const expectationPassed = codexExitCode === 0 ? await matchesExpectation(directory, evaluationCase) : null;
     const changedFiles = (await run("git", ["-C", directory, "diff", "--quiet"], { allowNonZero: true, suppressOutput: true })) !== 0;
     return {
       caseId: evaluationCase.id,
+      iteration,
       strategy,
       allocations: strategy === "single-model" ? { singleModel: manifest.singleModel } : {
         parent: manifest.fixedRoles.parent,
@@ -75,6 +80,7 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
       durationMs: Date.now() - startedAt,
       codexExitCode,
       validationExitCode,
+      expectationPassed,
       changedFiles,
       completedAt: new Date().toISOString(),
       failureKind: codexExitCode === 0 ? undefined : classifyCodexFailure(codex.stderr, codexExitCode)
@@ -82,6 +88,14 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
   } finally {
     await run("git", ["worktree", "remove", "--force", directory], { allowNonZero: true, suppressOutput: true });
   }
+}
+
+async function matchesExpectation(directory: string, evaluationCase: EvaluationCase): Promise<boolean | null> {
+  if (!evaluationCase.expectation) return null;
+  const target = resolve(directory, evaluationCase.expectation.file);
+  if (relative(directory, target).startsWith("..")) return false;
+  const diff = await runCapture("git", ["-C", directory, "diff", "--", evaluationCase.expectation.file]);
+  return evaluationCase.expectation.requiredPatterns.every((pattern) => diff.includes(pattern));
 }
 
 async function runCodex(args: string[]): Promise<{ exitCode: number; stderr: string }> {
@@ -92,6 +106,17 @@ async function runCodex(args: string[]): Promise<{ exitCode: number; stderr: str
     child.stderr?.on("data", (chunk: string) => { stderr = `${stderr}${chunk}`.slice(-4096); });
     child.on("error", reject);
     child.on("exit", (code) => resolvePromise({ exitCode: code ?? 1, stderr }));
+  });
+}
+
+async function runCapture(command: string, args: string[]): Promise<string> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, { shell: false, stdio: ["ignore", "pipe", "ignore"] });
+    let stdout = "";
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => { stdout += chunk; });
+    child.on("error", reject);
+    child.on("exit", (code) => code === 0 ? resolvePromise(stdout) : reject(new Error(`${command} exited with status ${code ?? 1}.`)));
   });
 }
 
@@ -116,7 +141,7 @@ async function run(command: string, args: string[], options: { cwd?: string; all
 }
 
 function parseArguments(argumentsList: string[]): Options {
-  const options: Options = { live: false, manifestPath: resolve("evals/baseline-manifest.json"), resultsDirectory: resolve("evals/results"), ref: "HEAD" };
+  const options: Options = { live: false, manifestPath: resolve("evals/baseline-manifest.json"), resultsDirectory: resolve("evals/results"), ref: "HEAD", iterations: 1 };
   for (let index = 0; index < argumentsList.length; index++) {
     const argument = argumentsList[index];
     if (argument === "--live") options.live = true;
@@ -124,9 +149,15 @@ function parseArguments(argumentsList: string[]): Options {
     else if (argument === "--results-dir") options.resultsDirectory = resolve(requiredValue(argumentsList, ++index, argument));
     else if (argument === "--ref") options.ref = requiredValue(argumentsList, ++index, argument);
     else if (argument === "--case") options.caseId = requiredValue(argumentsList, ++index, argument);
+    else if (argument === "--iterations") options.iterations = positiveInteger(requiredValue(argumentsList, ++index, argument), argument);
     else throw new Error(`Unknown argument: ${argument}.`);
   }
   return options;
+}
+
+function positiveInteger(value: string, option: string): number {
+  if (!/^\d+$/.test(value) || Number(value) < 1) throw new Error(`${option} requires a positive integer.`);
+  return Number(value);
 }
 
 function requiredValue(argumentsList: string[], index: number, option: string): string {
