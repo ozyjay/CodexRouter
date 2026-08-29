@@ -10,7 +10,9 @@
   "categories": ["AI", "Chat"],
   "activationEvents": [
     "onCommand:codexRouter.newRoutedTask",
-    "onCommand:codexRouter.routeSelection"
+    "onCommand:codexRouter.routeSelection",
+    "onCommand:codexRouter.showDiagnostics",
+    "onChatParticipant:codex-router.router"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -23,6 +25,11 @@
       {
         "command": "codexRouter.routeSelection",
         "title": "Send Selection to Codex Router",
+        "category": "Codex Router"
+      },
+      {
+        "command": "codexRouter.showDiagnostics",
+        "title": "Show Diagnostics",
         "category": "Codex Router"
       }
     ],

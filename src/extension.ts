@@ -11,6 +11,7 @@ let output: vscode.OutputChannel;
 
 export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel("Codex Router");
+  output.appendLine("Codex Router activated.");
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusItem.command = "codexRouter.newRoutedTask";
   setStatus("checking");
@@ -21,7 +22,8 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   context.subscriptions.push(
     vscode.commands.registerCommand("codexRouter.newRoutedTask", () => newRoutedTask(context)),
-    vscode.commands.registerCommand("codexRouter.routeSelection", () => routeSelection(context))
+    vscode.commands.registerCommand("codexRouter.routeSelection", () => routeSelection(context)),
+    vscode.commands.registerCommand("codexRouter.showDiagnostics", () => showDiagnostics())
   );
 
   if (vscode.chat) {
@@ -35,6 +37,9 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     participant.iconPath = new vscode.ThemeIcon("compass");
     context.subscriptions.push(participant);
+    output.appendLine("Registered the @router chat participant.");
+  } else {
+    output.appendLine("VS Code Chat Participant API is unavailable in this Extension Development Host; use the New Routed Task command.");
   }
 
   void refreshStatus();
@@ -196,10 +201,17 @@ async function getServer(): Promise<CodexAppServer> {
 async function refreshStatus(): Promise<void> {
   try {
     const status = await (await getServer()).start();
+    output.appendLine(`Codex App Server ready; authentication mode: ${status.authMethod ?? "none"}; models: ${status.models.length}.`);
     setStatus(isChatGPTAuthentication(status.authMethod) ? "ready" : "auth-required");
-  } catch {
+  } catch (error) {
+    output.appendLine(`[startup error] ${error instanceof Error ? error.message : "Unknown error."}`);
     setStatus("offline");
   }
+}
+
+function showDiagnostics(): void {
+  output.show(true);
+  output.appendLine("Diagnostics opened.");
 }
 
 function workspacePath(): string {

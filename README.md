@@ -80,6 +80,8 @@ Use **Codex Router: Send Selection to Codex Router** from an editor selection to
 
 The repository includes a **Run Codex Router** launch configuration. Open `src/extension.ts`, set a breakpoint, and press `F5`. VS Code first runs `npm run compile`, then opens an Extension Development Host with this extension loaded. Trigger **Codex Router: New Routed Task** in that development window to stop at the breakpoint. Use the **npm: watch** task while actively editing to rebuild on save.
 
+If something does not start, run **Codex Router: Show Diagnostics** from the Command Palette in the Extension Development Host. It opens the `Codex Router` output channel and records activation, Chat participant registration, App Server status, and safe error messages. `@router` requires that this VS Code host exposes the public Chat Participant API; the command entry point does not.
+
 ## Configuration
 
 | Setting | Default | Purpose |
