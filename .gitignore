@@ -3,3 +3,4 @@ dist/
 *.vsix
 *.log
 .vscode-test/
+evals/results/

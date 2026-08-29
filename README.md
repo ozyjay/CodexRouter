@@ -121,6 +121,10 @@ npm run check
 
 The test suite uses fake App Server and ModelDeck transports; it makes no Codex model turns and consumes no ChatGPT allowance.
 
+### Fixed-role baseline evaluation
+
+`npm run eval:baseline` performs a no-side-effect dry run of the fixed single-model versus Explorer/Worker/Reviewer evaluation manifest. A live run requires an explicit `--live` flag, validates every allocation against the live App Server catalogue, uses detached temporary worktrees, and consumes ChatGPT Codex allowance. See [the baseline evaluation guide](evals/README.md) for configuration and safeguards.
+
 ### Opt-in manual smoke test
 
 This starts a real Codex turn and consumes the user’s ChatGPT Codex allowance:

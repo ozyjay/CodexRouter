@@ -1,0 +1,29 @@
+# Baseline evaluation harness
+
+This harness compares a fixed single-model Codex turn with the same task run through fixed Explorer, Worker, and Reviewer roles. It is an evaluation utility, not part of the VS Code extension's normal routing flow.
+
+The manifest contains the evaluation prompts and therefore must be treated separately from Router telemetry. Generated reports contain only case IDs, model and effort allocations, durations, exit codes, whether a diff was produced, and validation status. They never contain task text, source code, Codex output, App Server traffic, or credentials.
+
+## Configure
+
+Update `baseline-manifest.json` with representative cases and the model/effort combinations available from the live Codex App Server catalogue. Each validation command is an executable plus an argument array; shell strings, redirects, and pipelines are intentionally unsupported.
+
+## Dry run
+
+```bash
+npm run eval:baseline
+```
+
+This validates the manifest and prints the planned cases. It does not start Codex, run validation commands, create worktrees, or write a report.
+
+## Live comparison
+
+```bash
+npm run eval:baseline -- --live
+```
+
+This explicitly consumes ChatGPT Codex allowance. Before starting a turn, it verifies ChatGPT authentication and validates every configured allocation against the live App Server catalogue. Each strategy starts in a fresh detached Git worktree at `HEAD`; fixed-role worktrees receive generated project-scoped custom-agent files. Codex output is discarded, then the manifest's validation command is run. The temporary worktree is removed afterwards.
+
+Use `--case focused-regression-test` to run a single case, and `--ref <commit-or-branch>` to evaluate a specific committed revision. Reports are written to `evals/results/`, which is ignored by Git.
+
+The current fixed-role workflow is deliberately sequential. The parent turn is asked to use Explorer, Worker, and Reviewer in that order. Parallel delegation is a separate variable and must not be compared with this baseline until it has its own evaluation arm.

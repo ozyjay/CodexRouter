@@ -77,7 +77,9 @@
     "compile": "tsc -p .",
     "watch": "tsc -watch -p .",
     "test": "tsx --test test/**/*.test.ts",
-    "check": "npm run compile && npm run test"
+    "check:baseline": "tsc --noEmit --target ES2022 --module commonjs --strict --esModuleInterop --skipLibCheck scripts/baseline-eval.ts",
+    "check": "npm run compile && npm run check:baseline && npm run test",
+    "eval:baseline": "tsx scripts/baseline-eval.ts"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",

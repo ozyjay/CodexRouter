@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "singleModel": {
+    "model": "gpt-5.6-terra",
+    "effort": "medium"
+  },
+  "fixedRoles": {
+    "parent": {
+      "model": "gpt-5.6-terra",
+      "effort": "medium"
+    },
+    "explorer": {
+      "model": "gpt-5.6-luna",
+      "effort": "low"
+    },
+    "worker": {
+      "model": "gpt-5.6-terra",
+      "effort": "medium"
+    },
+    "reviewer": {
+      "model": "gpt-5.6-sol",
+      "effort": "high"
+    }
+  },
+  "cases": [
+    {
+      "id": "focused-regression-test",
+      "prompt": "Add one focused regression test for an existing routing guardrail. Keep production behaviour unchanged and run the project's checks.",
+      "validation": {
+        "command": "npm",
+        "args": ["run", "check"]
+      }
+    }
+  ]
+}
