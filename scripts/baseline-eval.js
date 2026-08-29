@@ -54,7 +54,7 @@ async function runEvaluation(manifest, evaluationCase, strategy, ref) {
         const startedAt = Date.now();
         const codex = await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", (0, evaluation_1.buildPrompt)(strategy, evaluationCase)]);
         const codexExitCode = codex.exitCode;
-        const validationExitCode = codexExitCode === 0 ? await run(evaluationCase.validation.command, evaluationCase.validation.args, { cwd: directory, suppressOutput: true }) : null;
+        const validationExitCode = codexExitCode === 0 ? await run(evaluationCase.validation.command, evaluationCase.validation.args, { cwd: directory, allowNonZero: true, suppressOutput: true }) : null;
         const changedFiles = (await run("git", ["-C", directory, "diff", "--quiet"], { allowNonZero: true, suppressOutput: true })) !== 0;
         return {
             caseId: evaluationCase.id,
