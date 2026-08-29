@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.linkInstalledDependencies = linkInstalledDependencies;
 const node_child_process_1 = require("node:child_process");
 const node_fs_1 = require("node:fs");
 const promises_1 = require("node:fs/promises");
@@ -56,7 +57,7 @@ async function runEvaluation(manifest, evaluationCase, strategy, ref, iteration)
         const startedAt = Date.now();
         const codex = await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", (0, evaluation_1.buildPrompt)(strategy, evaluationCase)]);
         const codexExitCode = codex.exitCode;
-        const validationExitCode = codexExitCode === 0 ? await run(evaluationCase.validation.command, evaluationCase.validation.args, { cwd: directory, allowNonZero: true, suppressOutput: true }) : null;
+        const validationExitCode = codexExitCode === 0 ? await runValidation(directory, evaluationCase) : null;
         const expectationPassed = codexExitCode === 0 ? await matchesExpectation(directory, evaluationCase) : null;
         const changedFiles = (await run("git", ["-C", directory, "diff", "--quiet"], { allowNonZero: true, suppressOutput: true })) !== 0;
         return {
@@ -81,6 +82,23 @@ async function runEvaluation(manifest, evaluationCase, strategy, ref, iteration)
     finally {
         await run("git", ["worktree", "remove", "--force", directory], { allowNonZero: true, suppressOutput: true });
     }
+}
+async function runValidation(directory, evaluationCase) {
+    await linkInstalledDependencies(directory);
+    return run(evaluationCase.validation.command, evaluationCase.validation.args, { cwd: directory, allowNonZero: true, suppressOutput: true });
+}
+async function linkInstalledDependencies(directory) {
+    const source = (0, node_path_1.resolve)("node_modules");
+    let sourceStats;
+    try {
+        sourceStats = await node_fs_1.promises.stat(source);
+    }
+    catch {
+        throw new Error("Live baseline evaluation requires installed local dependencies in node_modules. Run npm install in the launch workspace first.");
+    }
+    if (!sourceStats.isDirectory())
+        throw new Error("Live baseline evaluation requires node_modules to be a directory.");
+    await node_fs_1.promises.symlink(source, (0, node_path_1.join)(directory, "node_modules"), process.platform === "win32" ? "junction" : "dir");
 }
 async function matchesExpectation(directory, evaluationCase) {
     if (!evaluationCase.expectation)
@@ -164,9 +182,11 @@ function requiredValue(argumentsList, index, option) {
         throw new Error(`${option} requires a value.`);
     return value;
 }
-void main().catch((error) => {
-    const message = error instanceof Error ? error.message : "Unknown baseline evaluation failure.";
-    process.stderr.write(`Baseline evaluation failed: ${message}\n`);
-    process.exitCode = 1;
-});
+if (require.main === module) {
+    void main().catch((error) => {
+        const message = error instanceof Error ? error.message : "Unknown baseline evaluation failure.";
+        process.stderr.write(`Baseline evaluation failed: ${message}\n`);
+        process.exitCode = 1;
+    });
+}
 //# sourceMappingURL=baseline-eval.js.map

@@ -64,7 +64,7 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
     const startedAt = Date.now();
     const codex = await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", buildPrompt(strategy, evaluationCase)]);
     const codexExitCode = codex.exitCode;
-    const validationExitCode = codexExitCode === 0 ? await run(evaluationCase.validation.command, evaluationCase.validation.args, { cwd: directory, allowNonZero: true, suppressOutput: true }) : null;
+    const validationExitCode = codexExitCode === 0 ? await runValidation(directory, evaluationCase) : null;
     const expectationPassed = codexExitCode === 0 ? await matchesExpectation(directory, evaluationCase) : null;
     const changedFiles = (await run("git", ["-C", directory, "diff", "--quiet"], { allowNonZero: true, suppressOutput: true })) !== 0;
     return {
@@ -88,6 +88,23 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
   } finally {
     await run("git", ["worktree", "remove", "--force", directory], { allowNonZero: true, suppressOutput: true });
   }
+}
+
+async function runValidation(directory: string, evaluationCase: EvaluationCase): Promise<number> {
+  await linkInstalledDependencies(directory);
+  return run(evaluationCase.validation.command, evaluationCase.validation.args, { cwd: directory, allowNonZero: true, suppressOutput: true });
+}
+
+export async function linkInstalledDependencies(directory: string): Promise<void> {
+  const source = resolve("node_modules");
+  let sourceStats;
+  try {
+    sourceStats = await fs.stat(source);
+  } catch {
+    throw new Error("Live baseline evaluation requires installed local dependencies in node_modules. Run npm install in the launch workspace first.");
+  }
+  if (!sourceStats.isDirectory()) throw new Error("Live baseline evaluation requires node_modules to be a directory.");
+  await fs.symlink(source, join(directory, "node_modules"), process.platform === "win32" ? "junction" : "dir");
 }
 
 async function matchesExpectation(directory: string, evaluationCase: EvaluationCase): Promise<boolean | null> {
@@ -166,8 +183,10 @@ function requiredValue(argumentsList: string[], index: number, option: string): 
   return value;
 }
 
-void main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : "Unknown baseline evaluation failure.";
-  process.stderr.write(`Baseline evaluation failed: ${message}\n`);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  void main().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : "Unknown baseline evaluation failure.";
+    process.stderr.write(`Baseline evaluation failed: ${message}\n`);
+    process.exitCode = 1;
+  });
+}

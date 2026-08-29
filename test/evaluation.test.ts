@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { CodexModel } from "../src/contracts";
 import { EvaluationManifest, buildPrompt, classifyCodexFailure, roleAgentFiles, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
+import { linkInstalledDependencies } from "../scripts/baseline-eval";
 
 const manifest: EvaluationManifest = {
   version: 1,
@@ -57,6 +61,16 @@ test("evaluation manifest accepts only safe, meaningful diff expectations", () =
   assert.deepEqual(validateEvaluationManifest(manifest), []);
   const invalid = { ...manifest, cases: [{ ...manifest.cases[0], expectation: { file: "../secret", requiredPatterns: [] } }] };
   assert.match(validateEvaluationManifest(invalid).join(" "), /expectation/);
+});
+
+test("validation dependencies are linked only when requested", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-router-evaluation-test-"));
+  try {
+    await linkInstalledDependencies(directory);
+    assert.equal(await realpath(join(directory, "node_modules")), await realpath(resolve("node_modules")));
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("Codex launcher failures are classified without retaining stderr", () => {
