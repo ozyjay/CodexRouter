@@ -1,7 +1,8 @@
 import { CodexModel, ReasoningEffort } from "./contracts";
 
 export type EvaluationStrategy = "single-model" | "fixed-roles";
-export type EvaluationFailureKind = "authentication" | "cli-configuration" | "model-allocation" | "worktree" | "startup-or-runtime";
+export type EvaluationExecutionBackend = "codex" | "simulated";
+export type EvaluationFailureKind = "authentication" | "cli-configuration" | "model-allocation" | "worktree" | "simulation" | "startup-or-runtime";
 
 export interface Allocation {
   model: string;
@@ -32,12 +33,19 @@ export interface MutationCheck {
   validation: ValidationCommand;
 }
 
+export interface SimulationPatch {
+  file: string;
+  search: string;
+  replacement: string;
+}
+
 export interface EvaluationCase {
   id: string;
   prompt: string;
   validation: ValidationCommand;
   expectation?: DiffExpectation;
   mutation?: MutationCheck;
+  simulation?: SimulationPatch;
 }
 
 export interface EvaluationManifest {
@@ -51,9 +59,10 @@ export interface EvaluationRunResult {
   caseId: string;
   iteration: number;
   strategy: EvaluationStrategy;
+  executionBackend: EvaluationExecutionBackend;
   allocations: Record<string, Allocation>;
   durationMs: number;
-  codexExitCode: number | null;
+  executionExitCode: number | null;
   validationExitCode: number | null;
   expectationPassed: boolean | null;
   mutationKilled: boolean | null;
@@ -101,6 +110,7 @@ export function validateEvaluationManifest(value: unknown): string[] {
     if (!isValidationCommand(candidate.validation)) errors.push(`cases[${index}] must have an executable validation command and argument array.`);
     if (candidate.expectation !== undefined && !isDiffExpectation(candidate.expectation)) errors.push(`cases[${index}] expectation must name a relative file and at least one required pattern.`);
     if (candidate.mutation !== undefined && !isMutationCheck(candidate.mutation)) errors.push(`cases[${index}] mutation must name a relative file, a non-empty search string, a replacement, and a validation command.`);
+    if (candidate.simulation !== undefined && !isSimulationPatch(candidate.simulation)) errors.push(`cases[${index}] simulation must name a relative file, a non-empty search string, and a replacement.`);
   }
   return errors;
 }
@@ -155,7 +165,7 @@ export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): E
     bucket.averageDurationMs += run.durationMs;
     durationTotals[run.strategy] += run.durationMs;
     durationTotal += run.durationMs;
-    if (run.codexExitCode === 0) completedRuns++;
+    if (run.executionExitCode === 0) completedRuns++;
     if (run.validationExitCode === 0) {
       validationPassedRuns++;
       bucket.validationPassed++;
@@ -253,6 +263,14 @@ function isMutationCheck(value: unknown): value is MutationCheck {
     && value.search.length > 0
     && typeof value.replacement === "string"
     && isValidationCommand(value.validation);
+}
+
+function isSimulationPatch(value: unknown): value is SimulationPatch {
+  return isRecord(value)
+    && isSafeRelativeFile(value.file)
+    && typeof value.search === "string"
+    && value.search.length > 0
+    && typeof value.replacement === "string";
 }
 
 function isSafeRelativeFile(value: unknown): value is string {

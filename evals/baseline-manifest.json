@@ -48,6 +48,11 @@
           "command": "npm",
           "args": ["run", "check"]
         }
+      },
+      "simulation": {
+        "file": "test/routing.test.ts",
+        "search": "\ntest(\"routing response validation rejects malformed or excessive advice\", () => {",
+        "replacement": "\ntest(\"deterministic guardrails escalate destructive work\", () => {\n  const candidate = fallbackRoute({ task: \"Rename a variable.\" });\n  const route = applyGuardrails(candidate, { task: \"Delete a database table.\" }, models);\n  assert.equal(route.recommendedModel, \"gpt-5.6-sol\");\n  assert.equal(route.recommendedEffort, \"high\");\n  assert.equal(route.risk, \"high\");\n});\n\ntest(\"routing response validation rejects malformed or excessive advice\", () => {"
       }
     }
   ]

@@ -81,6 +81,8 @@ Measure verified completion, test/build success, repair turns, elapsed time, use
 
 Report raw elapsed time only as a diagnostic. Compare strategy efficiency through average duration of verified runs and total evaluation time per verified completion, so failures and no-op runs cannot improve a strategy's apparent speed.
 
+Use a deterministic, explicitly labelled simulation backend to test worktree isolation, quality gates, reporting, and failure accounting without consuming Codex allowance. Simulation must never be presented as a result for Luna, Terra, Sol, or any live Codex allocation; use live App Server runs only to support those claims.
+
 Start with narrow tasks whose requested change, target test, and expected assertion are explicit. For each task, evaluate privacy-safe booleans that the temporary-worktree diff contains the required evidence, normal validation succeeds, and controlled fault injection is detected where the task adds a regression test. Run matched repeated trials for each strategy; a passing check without the requested evidence or a killed mutation is not verified completion.
 
 Prioritise avoiding under-routing on consequential work. A saving is not a success if verified quality regresses.

@@ -123,7 +123,7 @@ The test suite uses fake App Server and ModelDeck transports; it makes no Codex 
 
 ### Fixed-role baseline evaluation
 
-`npm run eval:baseline` performs a no-side-effect dry run of the fixed single-model versus Explorer/Worker/Reviewer evaluation manifest. A live run requires an explicit `--live` flag, validates every allocation against the live App Server catalogue, uses detached temporary worktrees, and consumes ChatGPT Codex allowance. Use `--iterations 3` for matched repeated trials. See [the baseline evaluation guide](evals/README.md) for configuration and safeguards.
+`npm run eval:baseline` performs a no-side-effect dry run of the fixed single-model versus Explorer/Worker/Reviewer evaluation manifest. Use `npm run eval:baseline:sim` for a deterministic, no-allowance worktree evaluation that tests the harness only. A live run requires an explicit `--live` flag, validates every allocation against the live App Server catalogue, uses detached temporary worktrees, and consumes ChatGPT Codex allowance. Use `--iterations 3` for matched repeated trials. See [the baseline evaluation guide](evals/README.md) for configuration and safeguards.
 
 ### Opt-in manual smoke test
 

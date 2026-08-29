@@ -4,10 +4,11 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { CodexAppServer, isChatGPTAuthentication } from "../src/appServer";
-import { EvaluationCase, EvaluationManifest, EvaluationRunResult, EvaluationStrategy, buildPrompt, classifyCodexFailure, roleAgentFiles, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
+import { EvaluationCase, EvaluationExecutionBackend, EvaluationManifest, EvaluationRunResult, EvaluationStrategy, buildPrompt, classifyCodexFailure, roleAgentFiles, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
 
 interface Options {
   live: boolean;
+  simulated: boolean;
   manifestPath: string;
   resultsDirectory: string;
   ref: string;
@@ -20,38 +21,42 @@ async function main(): Promise<void> {
   const manifest = await readManifest(options.manifestPath);
   const selectedCases = options.caseId ? manifest.cases.filter((evaluationCase) => evaluationCase.id === options.caseId) : manifest.cases;
   if (options.caseId && selectedCases.length === 0) throw new Error(`No evaluation case exists with ID ${options.caseId}.`);
+  if (options.live && options.simulated) throw new Error("Choose either --live or --simulated, not both.");
 
-  if (!options.live) {
-    process.stdout.write(`${JSON.stringify({ mode: "dry-run", cases: selectedCases.map((evaluationCase) => evaluationCase.id), strategies: ["single-model", "fixed-roles"], iterations: options.iterations, plannedRuns: selectedCases.length * 2 * options.iterations, message: "No Codex turn, validation command, worktree, or result file was created. Re-run with --live to consume Codex allowance." }, null, 2)}\n`);
+  if (!options.live && !options.simulated) {
+    process.stdout.write(`${JSON.stringify({ mode: "dry-run", cases: selectedCases.map((evaluationCase) => evaluationCase.id), strategies: ["single-model", "fixed-roles"], iterations: options.iterations, plannedRuns: selectedCases.length * 2 * options.iterations, message: "No Codex turn, validation command, worktree, or result file was created. Re-run with --simulated for an offline worktree evaluation or --live to consume Codex allowance." }, null, 2)}\n`);
     return;
   }
 
-  const server = new CodexAppServer();
-  try {
-    const status = await server.start();
-    if (!isChatGPTAuthentication(status.authMethod)) throw new Error("Live baseline evaluation requires existing ChatGPT authentication.");
-    const allocationErrors = validateAllocations(manifest, status.models);
-    if (allocationErrors.length > 0) throw new Error(`Live catalogue validation failed:\n${allocationErrors.join("\n")}`);
-  } finally {
-    server.dispose();
+  if (options.live) {
+    const server = new CodexAppServer();
+    try {
+      const status = await server.start();
+      if (!isChatGPTAuthentication(status.authMethod)) throw new Error("Live baseline evaluation requires existing ChatGPT authentication.");
+      const allocationErrors = validateAllocations(manifest, status.models);
+      if (allocationErrors.length > 0) throw new Error(`Live catalogue validation failed:\n${allocationErrors.join("\n")}`);
+    } finally {
+      server.dispose();
+    }
   }
 
+  const executionBackend: EvaluationExecutionBackend = options.simulated ? "simulated" : "codex";
   const runs: EvaluationRunResult[] = [];
   for (const evaluationCase of selectedCases) {
     for (let iteration = 1; iteration <= options.iterations; iteration++) {
       for (const strategy of ["single-model", "fixed-roles"] as const) {
-        runs.push(await runEvaluation(manifest, evaluationCase, strategy, options.ref, iteration));
+        runs.push(await runEvaluation(manifest, evaluationCase, strategy, options.ref, iteration, executionBackend));
       }
     }
   }
-  const report = { version: 1, generatedAt: new Date().toISOString(), ref: options.ref, runs, summary: summariseEvaluationRuns(runs) };
+  const report = { version: 2, generatedAt: new Date().toISOString(), ref: options.ref, executionBackend, runs, summary: summariseEvaluationRuns(runs) };
   await fs.mkdir(options.resultsDirectory, { recursive: true });
   const resultPath = join(options.resultsDirectory, `baseline-${report.generatedAt.replace(/[:.]/g, "-")}.json`);
   await fs.writeFile(resultPath, `${JSON.stringify(report, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  process.stdout.write(`${JSON.stringify({ resultPath, summary: report.summary }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ resultPath, executionBackend, summary: report.summary }, null, 2)}\n`);
 }
 
-async function runEvaluation(manifest: EvaluationManifest, evaluationCase: EvaluationCase, strategy: EvaluationStrategy, ref: string, iteration: number): Promise<EvaluationRunResult> {
+async function runEvaluation(manifest: EvaluationManifest, evaluationCase: EvaluationCase, strategy: EvaluationStrategy, ref: string, iteration: number, executionBackend: EvaluationExecutionBackend): Promise<EvaluationRunResult> {
   const directory = await mkdtemp(join(tmpdir(), "codex-router-baseline-"));
   try {
     await run("git", ["worktree", "add", "--detach", directory, ref]);
@@ -62,16 +67,19 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
     }
     const allocation = strategy === "single-model" ? manifest.singleModel : manifest.fixedRoles.parent;
     const startedAt = Date.now();
-    const codex = await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", buildPrompt(strategy, evaluationCase)]);
-    const codexExitCode = codex.exitCode;
-    const validationExitCode = codexExitCode === 0 ? await runValidation(directory, evaluationCase) : null;
-    const expectationPassed = codexExitCode === 0 ? await matchesExpectation(directory, evaluationCase) : null;
+    const execution = executionBackend === "codex"
+      ? await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", buildPrompt(strategy, evaluationCase)])
+      : await runSimulation(directory, evaluationCase);
+    const executionExitCode = execution.exitCode;
+    const validationExitCode = executionExitCode === 0 ? await runValidation(directory, evaluationCase) : null;
+    const expectationPassed = executionExitCode === 0 ? await matchesExpectation(directory, evaluationCase) : null;
     const changedFiles = (await run("git", ["-C", directory, "diff", "--quiet"], { allowNonZero: true, suppressOutput: true })) !== 0;
-    const mutationKilled = codexExitCode === 0 && validationExitCode === 0 && expectationPassed !== false ? await runMutationCheck(directory, evaluationCase) : null;
+    const mutationKilled = executionExitCode === 0 && validationExitCode === 0 && expectationPassed !== false ? await runMutationCheck(directory, evaluationCase) : null;
     return {
       caseId: evaluationCase.id,
       iteration,
       strategy,
+      executionBackend,
       allocations: strategy === "single-model" ? { singleModel: manifest.singleModel } : {
         parent: manifest.fixedRoles.parent,
         explorer: manifest.fixedRoles.explorer,
@@ -79,13 +87,13 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
         reviewer: manifest.fixedRoles.reviewer
       },
       durationMs: Date.now() - startedAt,
-      codexExitCode,
+      executionExitCode,
       validationExitCode,
       expectationPassed,
       mutationKilled,
       changedFiles,
       completedAt: new Date().toISOString(),
-      failureKind: codexExitCode === 0 ? undefined : classifyCodexFailure(codex.stderr, codexExitCode)
+      failureKind: executionExitCode === 0 ? undefined : executionBackend === "simulated" ? "simulation" : classifyCodexFailure(execution.stderr, executionExitCode)
     };
   } finally {
     await run("git", ["worktree", "remove", "--force", directory], { allowNonZero: true, suppressOutput: true });
@@ -103,9 +111,9 @@ export async function linkInstalledDependencies(directory: string): Promise<void
   try {
     sourceStats = await fs.stat(source);
   } catch {
-    throw new Error("Live baseline evaluation requires installed local dependencies in node_modules. Run npm install in the launch workspace first.");
+    throw new Error("Baseline evaluation requires installed local dependencies in node_modules. Run npm install in the launch workspace first.");
   }
-  if (!sourceStats.isDirectory()) throw new Error("Live baseline evaluation requires node_modules to be a directory.");
+  if (!sourceStats.isDirectory()) throw new Error("Baseline evaluation requires node_modules to be a directory.");
   await fs.symlink(source, join(directory, "node_modules"), process.platform === "win32" ? "junction" : "dir");
 }
 
@@ -135,6 +143,21 @@ export async function runMutationCheck(directory: string, evaluationCase: Evalua
   } finally {
     await fs.writeFile(target, original, "utf8");
   }
+}
+
+export async function runSimulation(directory: string, evaluationCase: EvaluationCase): Promise<{ exitCode: number; stderr: string }> {
+  if (!evaluationCase.simulation) return { exitCode: 1, stderr: "" };
+  const target = resolve(directory, evaluationCase.simulation.file);
+  if (relative(directory, target).startsWith("..")) return { exitCode: 1, stderr: "" };
+  let original: string;
+  try {
+    original = await fs.readFile(target, "utf8");
+  } catch {
+    return { exitCode: 1, stderr: "" };
+  }
+  if (!original.includes(evaluationCase.simulation.search)) return { exitCode: 1, stderr: "" };
+  await fs.writeFile(target, original.replace(evaluationCase.simulation.search, evaluationCase.simulation.replacement), "utf8");
+  return { exitCode: 0, stderr: "" };
 }
 
 async function runCodex(args: string[]): Promise<{ exitCode: number; stderr: string }> {
@@ -180,10 +203,11 @@ async function run(command: string, args: string[], options: { cwd?: string; all
 }
 
 function parseArguments(argumentsList: string[]): Options {
-  const options: Options = { live: false, manifestPath: resolve("evals/baseline-manifest.json"), resultsDirectory: resolve("evals/results"), ref: "HEAD", iterations: 1 };
+  const options: Options = { live: false, simulated: false, manifestPath: resolve("evals/baseline-manifest.json"), resultsDirectory: resolve("evals/results"), ref: "HEAD", iterations: 1 };
   for (let index = 0; index < argumentsList.length; index++) {
     const argument = argumentsList[index];
     if (argument === "--live") options.live = true;
+    else if (argument === "--simulated") options.simulated = true;
     else if (argument === "--manifest") options.manifestPath = resolve(requiredValue(argumentsList, ++index, argument));
     else if (argument === "--results-dir") options.resultsDirectory = resolve(requiredValue(argumentsList, ++index, argument));
     else if (argument === "--ref") options.ref = requiredValue(argumentsList, ++index, argument);
