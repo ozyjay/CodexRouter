@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { CodexAppServer, isChatGPTAuthentication } from "../src/appServer";
 import { ModelDeckProvider, SimulationSelectorRecommendation } from "../src/modelDeck";
-import { EvaluationCase, EvaluationExecutionBackend, EvaluationManifest, EvaluationRunResult, EvaluationStrategy, SimulationPatch, SimulationProfile, SimulationRunMetadata, buildPrompt, classifyCodexFailure, roleAgentFiles, simulationPatchForProfile, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
+import { EvaluationCase, EvaluationExecutionBackend, EvaluationManifest, EvaluationRunResult, EvaluationStrategy, SimulationProfile, SimulationRunMetadata, SimulationScenario, buildPrompt, classifyCodexFailure, roleAgentFiles, simulationPatchForProfile, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
 
 type SimulationSelectorKind = "deterministic" | "modeldeck";
 
@@ -14,7 +14,7 @@ interface SimulationSelector {
 }
 
 interface ResolvedSimulation {
-  patch?: SimulationPatch;
+  patch?: SimulationScenario;
   metadata: SimulationRunMetadata;
 }
 
@@ -137,7 +137,7 @@ async function resolveSimulation(evaluationCase: EvaluationCase, selectorKind: S
     const recommendation = await selector.selectSimulationProfile({
       task: evaluationCase.prompt,
       taskCategory: taskCategory(evaluationCase),
-      estimatedFilesAffected: evaluationCase.expectation ? 1 : 2,
+      estimatedFilesAffected: evaluationCase.estimatedFilesAffected ?? (evaluationCase.expectation ? 1 : 2),
       testsRequested: /\b(test|validation|assert)\b/i.test(evaluationCase.prompt),
       riskFlags: riskFlags(evaluationCase.prompt)
     });
@@ -161,9 +161,17 @@ async function resolveSimulation(evaluationCase: EvaluationCase, selectorKind: S
 
 function resolvedSimulation(evaluationCase: EvaluationCase, selectedProfile: SimulationProfile, selector: SimulationSelectorKind, fallback: boolean): ResolvedSimulation {
   const selected = simulationPatchForProfile(evaluationCase, selectedProfile);
+  const expectedProfile = evaluationCase.expectedSimulationProfile;
   return {
     patch: selected.patch,
-    metadata: { selectedProfile, appliedProfile: selected.profile, selector, fallback: fallback || selected.profile !== selectedProfile }
+    metadata: {
+      selectedProfile,
+      appliedProfile: selected.profile,
+      expectedProfile,
+      expectedProfileMatched: expectedProfile === undefined ? undefined : selectedProfile === expectedProfile,
+      selector,
+      fallback: fallback || selected.profile !== selectedProfile
+    }
   };
 }
 
@@ -235,19 +243,36 @@ export async function runMutationCheck(directory: string, evaluationCase: Evalua
   }
 }
 
-export async function runSimulation(directory: string, patch?: SimulationPatch): Promise<{ exitCode: number; stderr: string }> {
-  if (!patch) return { exitCode: 1, stderr: "" };
-  const target = resolve(directory, patch.file);
-  if (relative(directory, target).startsWith("..")) return { exitCode: 1, stderr: "" };
-  let original: string;
+export async function runSimulation(directory: string, scenario?: SimulationScenario): Promise<{ exitCode: number; stderr: string }> {
+  if (!scenario) return { exitCode: 1, stderr: "" };
+  const patches = "patches" in scenario ? scenario.patches : [scenario];
+  const contents = new Map<string, { original: string; updated: string }>();
+  for (const patch of patches) {
+    const target = resolve(directory, patch.file);
+    if (relative(directory, target).startsWith("..")) return { exitCode: 1, stderr: "" };
+    let current = contents.get(target);
+    if (!current) {
+      let original: string;
+      try {
+        original = await fs.readFile(target, "utf8");
+      } catch {
+        return { exitCode: 1, stderr: "" };
+      }
+      current = { original, updated: original };
+      contents.set(target, current);
+    }
+    if (!current.updated.includes(patch.search)) return { exitCode: 1, stderr: "" };
+    current.updated = current.updated.replace(patch.search, patch.replacement);
+  }
   try {
-    original = await fs.readFile(target, "utf8");
+    await Promise.all([...contents.entries()].map(([target, content]) => fs.writeFile(target, content.updated, "utf8")));
+    return { exitCode: 0, stderr: "" };
   } catch {
+    await Promise.all([...contents.entries()].map(async ([target, content]) => {
+      try { await fs.writeFile(target, content.original, "utf8"); } catch { /* Best-effort recovery after a local simulation write failure. */ }
+    }));
     return { exitCode: 1, stderr: "" };
   }
-  if (!original.includes(patch.search)) return { exitCode: 1, stderr: "" };
-  await fs.writeFile(target, original.replace(patch.search, patch.replacement), "utf8");
-  return { exitCode: 0, stderr: "" };
 }
 
 async function runCodex(args: string[]): Promise<{ exitCode: number; stderr: string }> {

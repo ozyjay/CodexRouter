@@ -70,7 +70,60 @@
           "search": "\ntest(\"routing response validation rejects malformed or excessive advice\", () => {",
           "replacement": "\ntest(\"deterministic guardrails escalate destructive work\", () => {\n  const candidate = fallbackRoute({ task: \"Rename a variable.\" });\n  const route = applyGuardrails(candidate, { task: \"Delete a database table.\" }, models);\n  assert.equal(route.recommendedModel, \"gpt-5.6-sol\");\n  assert.equal(route.recommendedEffort, \"high\");\n  assert.equal(route.risk, \"high\");\n});\n\ntest(\"routing response validation rejects malformed or excessive advice\", () => {"
         }
-      }
+      },
+      "expectedSimulationProfile": "sim-strong"
+    },
+    {
+      "id": "focused-evaluation-doc",
+      "prompt": "In README.md, add one concise sentence immediately before the Current limitations heading that explains selector calibration uses expected simulation tiers. Do not change code or other documentation. Run npm run check.",
+      "validation": {
+        "command": "npm",
+        "args": ["run", "check"]
+      },
+      "expectation": {
+        "file": "README.md",
+        "requiredPatterns": [
+          "Selector calibration uses expected simulation tiers."
+        ]
+      },
+      "simulation": {
+        "file": "README.md",
+        "search": "\n## Current limitations and next steps",
+        "replacement": "\nSelector calibration uses expected simulation tiers.\n\n## Current limitations and next steps"
+      },
+      "expectedSimulationProfile": "sim-small"
+    },
+    {
+      "id": "bounded-tier-helper-test",
+      "prompt": "Update the baseline evaluation documentation and test coverage together. In test/evaluation.test.ts, add exactly one test named \"simulation profiles preserve an explicitly selected tier\". It must call simulationPatchForProfile with a sim-balanced declared patch and assert that sim-balanced is retained. In evals/README.md, add one concise sentence explaining that a balanced simulation scenario can modify multiple declared files. Do not change production files. Run npm run check.",
+      "validation": {
+        "command": "npm",
+        "args": ["run", "check"]
+      },
+      "expectation": {
+        "file": "test/evaluation.test.ts",
+        "requiredPatterns": [
+          "simulation profiles preserve an explicitly selected tier",
+          "sim-balanced",
+          "simulationPatchForProfile"
+        ]
+      },
+      "simulation": {
+        "patches": [
+          {
+            "file": "test/evaluation.test.ts",
+            "search": "\ntest(\"simulated execution applies only its declared deterministic patch\", async () => {",
+            "replacement": "\ntest(\"simulation profiles preserve an explicitly selected tier\", () => {\n  const selected = simulationPatchForProfile({ ...manifest.cases[0], simulationProfiles: { \"sim-balanced\": { file: \"test/evaluation.test.ts\", search: \"before\", replacement: \"after\" } } }, \"sim-balanced\");\n  assert.equal(selected.profile, \"sim-balanced\");\n});\n\ntest(\"simulated execution applies only its declared deterministic patch\", async () => {"
+          },
+          {
+            "file": "evals/README.md",
+            "search": "\n## Live comparison",
+            "replacement": "\nA balanced simulation scenario can modify multiple declared files.\n\n## Live comparison"
+          }
+        ]
+      },
+      "expectedSimulationProfile": "sim-balanced",
+      "estimatedFilesAffected": 2
     }
   ]
 }

@@ -60,6 +60,8 @@ test("evaluation summary excludes prompts and aggregates verification", () => {
   assert.equal(summary.byStrategy["fixed-roles"].costPerVerifiedRunMs, null);
   assert.equal(summary.byStrategy["fixed-roles"].expectationPassed, 0);
   assert.equal(summary.averageDurationMs, 150);
+  assert.equal(summary.selectorExpectedRuns, 0);
+  assert.equal(summary.selectorExpectedMatchRate, null);
   assert.equal(JSON.stringify(summary).includes("Add one test"), false);
 });
 
@@ -82,13 +84,36 @@ test("simulated execution applies only its declared deterministic patch", async 
   }
 });
 
+test("simulated execution applies every patch in a declared deterministic scenario", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-router-simulation-test-"));
+  try {
+    await Promise.all([writeFile(join(directory, "first.txt"), "first", "utf8"), writeFile(join(directory, "second.txt"), "second", "utf8")]);
+    assert.equal((await runSimulation(directory, { patches: [{ file: "first.txt", search: "first", replacement: "updated-first" }, { file: "second.txt", search: "second", replacement: "updated-second" }] })).exitCode, 0);
+    assert.equal(await readFile(join(directory, "first.txt"), "utf8"), "updated-first");
+    assert.equal(await readFile(join(directory, "second.txt"), "utf8"), "updated-second");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("simulation profiles select only declared deterministic patches", () => {
   const selected = simulationPatchForProfile({ ...manifest.cases[0], simulationProfiles: { "sim-small": { file: "test/routing.test.ts", search: "small", replacement: "small-result" } } }, "sim-small");
   assert.equal(selected.profile, "sim-small");
   assert.equal(selected.patch?.replacement, "small-result");
   const fallback = simulationPatchForProfile(manifest.cases[0], "sim-strong");
-  assert.equal(fallback.profile, "sim-balanced");
+  assert.equal(fallback.profile, "sim-strong");
   assert.equal(fallback.patch, manifest.cases[0].simulation);
+});
+
+test("evaluation summary tracks expected simulation-profile matches without case IDs", () => {
+  const summary = summariseEvaluationRuns([
+    { caseId: "small-case", iteration: 1, strategy: "single-model", executionBackend: "simulated", allocations: {}, durationMs: 10, executionExitCode: 0, validationExitCode: 0, expectationPassed: true, mutationKilled: null, changedFiles: true, completedAt: "2026-08-30T00:00:00.000Z", simulation: { selectedProfile: "sim-small", appliedProfile: "sim-small", expectedProfile: "sim-small", expectedProfileMatched: true, selector: "modeldeck", fallback: false } },
+    { caseId: "balanced-case", iteration: 1, strategy: "single-model", executionBackend: "simulated", allocations: {}, durationMs: 10, executionExitCode: 0, validationExitCode: 0, expectationPassed: true, mutationKilled: null, changedFiles: true, completedAt: "2026-08-30T00:00:00.000Z", simulation: { selectedProfile: "sim-strong", appliedProfile: "sim-strong", expectedProfile: "sim-balanced", expectedProfileMatched: false, selector: "modeldeck", fallback: false } }
+  ]);
+  assert.equal(summary.selectorExpectedRuns, 2);
+  assert.equal(summary.selectorMatchedExpectedRuns, 1);
+  assert.equal(summary.selectorExpectedMatchRate, 0.5);
+  assert.equal(JSON.stringify(summary).includes("small-case"), false);
 });
 
 test("simulated execution fails safely when its patch cannot be applied", async () => {

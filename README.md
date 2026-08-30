@@ -127,6 +127,8 @@ The test suite uses fake App Server and ModelDeck transports; it makes no Codex 
 
 To test the optional local ModelDeck simulation selector without a Codex turn, use `npm run eval:baseline:sim -- --selector modeldeck --modeldeck-model codex-router-simulation-selector`. The selector only chooses a declared deterministic tier; malformed, unavailable, or timed-out selector responses visibly fall back to `sim-balanced`.
 
+The simulation summary also records the match rate for manifest cases with an explicit expected simulation tier. This measures selector calibration only; it does not attribute quality or performance to a Codex or local proxy model.
+
 ### Opt-in manual smoke test
 
 This starts a real Codex turn and consumes the user’s ChatGPT Codex allowance:

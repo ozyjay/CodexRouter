@@ -36,6 +36,10 @@ npm run eval:baseline:sim -- \
 
 The selector receives only the evaluation task and compact metadata. It selects `sim-small`, `sim-balanced`, or `sim-strong`; the harness then applies that case's declared deterministic patch for the selected tier and runs the ordinary gates. It records the public selector model ID, the live local Worker identity, latency, selected tier, and fallback status, but never the prompt, response, patch, or source code. A timeout, unavailable route, malformed response, or unknown tier uses deterministic `sim-balanced` and records only that fallback occurred.
 
+Cases may declare `expectedSimulationProfile`. This is a selector-calibration label, not a quality gate: the summary reports expected-tier decisions and match rate while the deterministic patch continues to exercise the same worktree gates. Start with unambiguous cases, then review mismatches before changing routing policy.
+
+A declared simulation scenario may contain one patch or an ordered set of patches across multiple relative files. Every patch is checked before any file is written; an inapplicable patch fails the scenario without a partial simulated change.
+
 `--selector modeldeck` performs local ModelDeck inference but does not start Codex or consume ChatGPT allowance. It is a selector-quality and harness test, not an evaluation of the local proxy models or Codex allocations.
 
 ## Live comparison
