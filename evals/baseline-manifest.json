@@ -25,7 +25,7 @@
   "cases": [
     {
       "id": "focused-regression-test",
-      "prompt": "In test/routing.test.ts, add exactly one test named \"deterministic guardrails escalate destructive work\". It must create a candidate with fallbackRoute({ task: \"Rename a variable.\" }), pass it to applyGuardrails with the task \"Delete a database table.\" and the existing models fixture, then assert recommendedModel is \"gpt-5.6-sol\", recommendedEffort is \"high\", and risk is \"high\". Do not change production files or existing tests. Run npm run check.",
+      "prompt": "In test/routing.test.ts, add exactly one test named \"deterministic guardrails escalate destructive work\". It must create a candidate with fallbackRoute({ task: \"Rename a variable.\" }), pass it to applyGuardrails with the task \"Delete a database table.\" and the existing models fixture, then assert recommendedModel is \"gpt-5.6-sol\", recommendedEffort is \"high\", and risk is \"high\". Do not change production files or test files other than test/routing.test.ts. Run npm run check.",
       "validation": {
         "command": "npm",
         "args": ["run", "check"]
