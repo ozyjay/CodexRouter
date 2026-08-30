@@ -32,6 +32,7 @@ interface Options {
   modelDeckModel: string;
   selectorTimeoutMs: number;
   proxyTimeoutMs: number;
+  proxyMaxTokens: number;
   proxyModels: Record<SimulationProfile, string>;
 }
 
@@ -66,7 +67,7 @@ async function main(): Promise<void> {
     ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, routerModel: options.modelDeckModel, timeoutMs: options.selectorTimeoutMs })
     : undefined;
   const proxyProvider = executionBackend === "slm-proxy"
-    ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, timeoutMs: options.proxyTimeoutMs })
+    ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, timeoutMs: options.proxyTimeoutMs, proxyMaxTokens: options.proxyMaxTokens })
     : undefined;
   const runs: EvaluationRunResult[] = [];
   for (const evaluationCase of selectedCases) {
@@ -92,6 +93,7 @@ async function main(): Promise<void> {
       allocationAttribution: "none",
       performanceAttribution: "local-proxy-only",
       selector: options.selector === "modeldeck" ? { kind: "modeldeck", publicModelId: options.modelDeckModel } : { kind: "deterministic" },
+      proxyMaxTokens: options.proxyMaxTokens,
       profileModels: options.proxyModels
     } : undefined,
     runs,
@@ -397,7 +399,7 @@ async function run(command: string, args: string[], options: { cwd?: string; all
 }
 
 function parseArguments(argumentsList: string[]): Options {
-  const options: Options = { live: false, simulated: false, slmProxy: false, manifestPath: resolve("evals/baseline-manifest.json"), resultsDirectory: resolve("evals/results"), ref: "HEAD", iterations: 1, selector: "deterministic", modelDeckBaseUrl: "http://127.0.0.1:8600/v1", modelDeckModel: "codex-router-simulation-selector", selectorTimeoutMs: 15_000, proxyTimeoutMs: 60_000, proxyModels: { "sim-small": "codex-router-proxy-small", "sim-balanced": "codex-router-proxy-balanced", "sim-strong": "codex-router-proxy-strong" } };
+  const options: Options = { live: false, simulated: false, slmProxy: false, manifestPath: resolve("evals/baseline-manifest.json"), resultsDirectory: resolve("evals/results"), ref: "HEAD", iterations: 1, selector: "deterministic", modelDeckBaseUrl: "http://127.0.0.1:8600/v1", modelDeckModel: "codex-router-simulation-selector", selectorTimeoutMs: 15_000, proxyTimeoutMs: 180_000, proxyMaxTokens: 2_048, proxyModels: { "sim-small": "codex-router-proxy-small", "sim-balanced": "codex-router-proxy-balanced", "sim-strong": "codex-router-proxy-strong" } };
   for (let index = 0; index < argumentsList.length; index++) {
     const argument = argumentsList[index];
     if (argument === "--live") options.live = true;
@@ -413,6 +415,7 @@ function parseArguments(argumentsList: string[]): Options {
     else if (argument === "--modeldeck-model") options.modelDeckModel = requiredValue(argumentsList, ++index, argument);
     else if (argument === "--selector-timeout-ms") options.selectorTimeoutMs = positiveInteger(requiredValue(argumentsList, ++index, argument), argument);
     else if (argument === "--proxy-timeout-ms") options.proxyTimeoutMs = positiveInteger(requiredValue(argumentsList, ++index, argument), argument);
+    else if (argument === "--proxy-max-tokens") options.proxyMaxTokens = boundedPositiveInteger(requiredValue(argumentsList, ++index, argument), argument, 256, 8_192);
     else if (argument === "--proxy-model-small") options.proxyModels["sim-small"] = requiredValue(argumentsList, ++index, argument);
     else if (argument === "--proxy-model-balanced") options.proxyModels["sim-balanced"] = requiredValue(argumentsList, ++index, argument);
     else if (argument === "--proxy-model-strong") options.proxyModels["sim-strong"] = requiredValue(argumentsList, ++index, argument);
@@ -429,6 +432,12 @@ function simulationSelectorKind(value: string): SimulationSelectorKind {
 function positiveInteger(value: string, option: string): number {
   if (!/^\d+$/.test(value) || Number(value) < 1) throw new Error(`${option} requires a positive integer.`);
   return Number(value);
+}
+
+function boundedPositiveInteger(value: string, option: string, minimum: number, maximum: number): number {
+  const parsed = positiveInteger(value, option);
+  if (parsed < minimum || parsed > maximum) throw new Error(`${option} requires an integer from ${minimum} to ${maximum}.`);
+  return parsed;
 }
 
 function requiredValue(argumentsList: string[], index: number, option: string): string {

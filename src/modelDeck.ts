@@ -6,6 +6,7 @@ export interface ModelDeckConfig {
   baseUrl: string;
   routerModel?: string;
   timeoutMs: number;
+  proxyMaxTokens?: number;
 }
 
 interface ModelDeckModel {
@@ -130,7 +131,7 @@ export class ModelDeckProvider {
         model,
         stream: false,
         temperature: 0,
-        max_tokens: 512,
+        max_tokens: this.config.proxyMaxTokens ?? 2_048,
         messages: [
           { role: "system", content: PROXY_CANDIDATE_PROMPT },
           { role: "user", content: JSON.stringify(input) }

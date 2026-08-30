@@ -56,8 +56,10 @@ test("ModelDeck simulation selector rejects unbounded output", async () => {
 test("ModelDeck proxy candidates are restricted to declared contextual files and patches", async () => {
   const originalFetch = globalThis.fetch;
   let requestCount = 0;
-  globalThis.fetch = (async () => {
+  let completionBody: { max_tokens?: number } | undefined;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     requestCount++;
+    if (requestCount === 2 && typeof init?.body === "string") completionBody = JSON.parse(init.body) as { max_tokens?: number };
     return new Response(JSON.stringify(requestCount === 1
       ? { data: [{ id: "codex-router-proxy-strong", ready: true, revision: "proxy-revision", modeldeck: { model_id: "local/proxy" } }] }
       : { choices: [{ message: { content: "<think>Choose the supplied test file.</think>\n{\"patches\":[{\"file\":\"test/routing.test.ts\",\"search\":\"original\",\"replacement\":\"updated\"}]}" } }] }), { status: 200 });
@@ -74,6 +76,7 @@ test("ModelDeck proxy candidates are restricted to declared contextual files and
       patches: [{ file: "test/routing.test.ts", search: "original", replacement: "updated" }],
       model: { publicModelId: "codex-router-proxy-strong", localModelId: "local/proxy", revision: "proxy-revision" }
     });
+    assert.equal(completionBody?.max_tokens, 2_048);
   } finally {
     globalThis.fetch = originalFetch;
   }
