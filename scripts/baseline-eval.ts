@@ -4,7 +4,19 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { CodexAppServer, isChatGPTAuthentication } from "../src/appServer";
-import { EvaluationCase, EvaluationExecutionBackend, EvaluationManifest, EvaluationRunResult, EvaluationStrategy, buildPrompt, classifyCodexFailure, roleAgentFiles, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
+import { ModelDeckProvider, SimulationSelectorRecommendation } from "../src/modelDeck";
+import { EvaluationCase, EvaluationExecutionBackend, EvaluationManifest, EvaluationRunResult, EvaluationStrategy, SimulationPatch, SimulationProfile, SimulationRunMetadata, buildPrompt, classifyCodexFailure, roleAgentFiles, simulationPatchForProfile, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
+
+type SimulationSelectorKind = "deterministic" | "modeldeck";
+
+interface SimulationSelector {
+  selectSimulationProfile(input: { task: string; taskCategory: string; estimatedFilesAffected: number; testsRequested: boolean; riskFlags: string[] }): Promise<SimulationSelectorRecommendation>;
+}
+
+interface ResolvedSimulation {
+  patch?: SimulationPatch;
+  metadata: SimulationRunMetadata;
+}
 
 interface Options {
   live: boolean;
@@ -14,6 +26,10 @@ interface Options {
   ref: string;
   caseId?: string;
   iterations: number;
+  selector: SimulationSelectorKind;
+  modelDeckBaseUrl: string;
+  modelDeckModel: string;
+  selectorTimeoutMs: number;
 }
 
 async function main(): Promise<void> {
@@ -22,9 +38,10 @@ async function main(): Promise<void> {
   const selectedCases = options.caseId ? manifest.cases.filter((evaluationCase) => evaluationCase.id === options.caseId) : manifest.cases;
   if (options.caseId && selectedCases.length === 0) throw new Error(`No evaluation case exists with ID ${options.caseId}.`);
   if (options.live && options.simulated) throw new Error("Choose either --live or --simulated, not both.");
+  if (options.selector === "modeldeck" && !options.simulated && (options.live || options.simulated)) throw new Error("--selector modeldeck is available only with --simulated.");
 
   if (!options.live && !options.simulated) {
-    process.stdout.write(`${JSON.stringify({ mode: "dry-run", cases: selectedCases.map((evaluationCase) => evaluationCase.id), strategies: ["single-model", "fixed-roles"], iterations: options.iterations, plannedRuns: selectedCases.length * 2 * options.iterations, message: "No Codex turn, validation command, worktree, or result file was created. Re-run with --simulated for an offline worktree evaluation or --live to consume Codex allowance." }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ mode: "dry-run", cases: selectedCases.map((evaluationCase) => evaluationCase.id), strategies: ["single-model", "fixed-roles"], iterations: options.iterations, plannedRuns: selectedCases.length * 2 * options.iterations, simulationSelector: options.selector === "modeldeck" ? { kind: options.selector, model: options.modelDeckModel } : { kind: options.selector }, message: "No Codex turn, ModelDeck request, validation command, worktree, or result file was created. Re-run with --simulated for an offline worktree evaluation or --live to consume Codex allowance." }, null, 2)}\n`);
     return;
   }
 
@@ -41,11 +58,14 @@ async function main(): Promise<void> {
   }
 
   const executionBackend: EvaluationExecutionBackend = options.simulated ? "simulated" : "codex";
+  const selector = executionBackend === "simulated" && options.selector === "modeldeck"
+    ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, routerModel: options.modelDeckModel, timeoutMs: options.selectorTimeoutMs })
+    : undefined;
   const runs: EvaluationRunResult[] = [];
   for (const evaluationCase of selectedCases) {
     for (let iteration = 1; iteration <= options.iterations; iteration++) {
       for (const strategy of ["single-model", "fixed-roles"] as const) {
-        runs.push(await runEvaluation(manifest, evaluationCase, strategy, options.ref, iteration, executionBackend));
+        runs.push(await runEvaluation(manifest, evaluationCase, strategy, options.ref, iteration, executionBackend, options.selector, selector));
       }
     }
   }
@@ -57,7 +77,8 @@ async function main(): Promise<void> {
     simulation: executionBackend === "simulated" ? {
       purpose: "Validate evaluation-harness isolation, quality gates, reporting, and failure accounting without a Codex turn.",
       allocationAttribution: "none",
-      performanceAttribution: "none"
+      performanceAttribution: "none",
+      selector: options.selector === "modeldeck" ? { kind: "modeldeck", publicModelId: options.modelDeckModel } : { kind: "deterministic" }
     } : undefined,
     runs,
     summary: summariseEvaluationRuns(runs)
@@ -68,7 +89,7 @@ async function main(): Promise<void> {
   process.stdout.write(`${JSON.stringify({ resultPath, executionBackend, summary: report.summary }, null, 2)}\n`);
 }
 
-async function runEvaluation(manifest: EvaluationManifest, evaluationCase: EvaluationCase, strategy: EvaluationStrategy, ref: string, iteration: number, executionBackend: EvaluationExecutionBackend): Promise<EvaluationRunResult> {
+async function runEvaluation(manifest: EvaluationManifest, evaluationCase: EvaluationCase, strategy: EvaluationStrategy, ref: string, iteration: number, executionBackend: EvaluationExecutionBackend, selectorKind: SimulationSelectorKind, selector?: SimulationSelector): Promise<EvaluationRunResult> {
   const directory = await mkdtemp(join(tmpdir(), "codex-router-baseline-"));
   try {
     await run("git", ["worktree", "add", "--detach", directory, ref]);
@@ -79,9 +100,10 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
     }
     const allocation = strategy === "single-model" ? manifest.singleModel : manifest.fixedRoles.parent;
     const startedAt = Date.now();
+    const simulation = executionBackend === "simulated" ? await resolveSimulation(evaluationCase, selectorKind, selector) : undefined;
     const execution = executionBackend === "codex"
       ? await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", buildPrompt(strategy, evaluationCase)])
-      : await runSimulation(directory, evaluationCase);
+      : await runSimulation(directory, simulation?.patch);
     const executionExitCode = execution.exitCode;
     const validationExitCode = executionExitCode === 0 ? await runValidation(directory, evaluationCase) : null;
     const expectationPassed = executionExitCode === 0 ? await matchesExpectation(directory, evaluationCase) : null;
@@ -100,11 +122,62 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
       mutationKilled,
       changedFiles,
       completedAt: new Date().toISOString(),
-      failureKind: executionExitCode === 0 ? undefined : executionBackend === "simulated" ? "simulation" : classifyCodexFailure(execution.stderr, executionExitCode)
+      failureKind: executionExitCode === 0 ? undefined : executionBackend === "simulated" ? "simulation" : classifyCodexFailure(execution.stderr, executionExitCode),
+      simulation: simulation?.metadata
     };
   } finally {
     await run("git", ["worktree", "remove", "--force", directory], { allowNonZero: true, suppressOutput: true });
   }
+}
+
+async function resolveSimulation(evaluationCase: EvaluationCase, selectorKind: SimulationSelectorKind, selector?: SimulationSelector): Promise<ResolvedSimulation> {
+  if (!selector || selectorKind === "deterministic") return resolvedSimulation(evaluationCase, "sim-balanced", "deterministic", false);
+  const startedAt = Date.now();
+  try {
+    const recommendation = await selector.selectSimulationProfile({
+      task: evaluationCase.prompt,
+      taskCategory: taskCategory(evaluationCase),
+      estimatedFilesAffected: evaluationCase.expectation ? 1 : 2,
+      testsRequested: /\b(test|validation|assert)\b/i.test(evaluationCase.prompt),
+      riskFlags: riskFlags(evaluationCase.prompt)
+    });
+    const resolved = resolvedSimulation(evaluationCase, recommendation.simulationProfile, "modeldeck", false);
+    return {
+      ...resolved,
+      metadata: {
+        ...resolved.metadata,
+        selectorDurationMs: Date.now() - startedAt,
+        selectorModel: recommendation.model
+      }
+    };
+  } catch {
+    const resolved = resolvedSimulation(evaluationCase, "sim-balanced", "modeldeck", true);
+    return {
+      ...resolved,
+      metadata: { ...resolved.metadata, selectorDurationMs: Date.now() - startedAt }
+    };
+  }
+}
+
+function resolvedSimulation(evaluationCase: EvaluationCase, selectedProfile: SimulationProfile, selector: SimulationSelectorKind, fallback: boolean): ResolvedSimulation {
+  const selected = simulationPatchForProfile(evaluationCase, selectedProfile);
+  return {
+    patch: selected.patch,
+    metadata: { selectedProfile, appliedProfile: selected.profile, selector, fallback: fallback || selected.profile !== selectedProfile }
+  };
+}
+
+function taskCategory(evaluationCase: EvaluationCase): string {
+  if (/\b(test|assert|regression)\b/i.test(evaluationCase.prompt)) return "testing";
+  if (/\b(debug|fix|bug|error)\b/i.test(evaluationCase.prompt)) return "debugging";
+  return "implementation";
+}
+
+function riskFlags(task: string): string[] {
+  const flags: string[] = [];
+  if (/\b(delete|drop|destroy|remove database)\b/i.test(task)) flags.push("destructive");
+  if (/\b(security|auth|credential|permission|secret)\b/i.test(task)) flags.push("security-sensitive");
+  return flags;
 }
 
 export function allocationsForRun(manifest: EvaluationManifest, strategy: EvaluationStrategy, executionBackend: EvaluationExecutionBackend): Record<string, { model: string; effort: string }> {
@@ -162,9 +235,9 @@ export async function runMutationCheck(directory: string, evaluationCase: Evalua
   }
 }
 
-export async function runSimulation(directory: string, evaluationCase: EvaluationCase): Promise<{ exitCode: number; stderr: string }> {
-  if (!evaluationCase.simulation) return { exitCode: 1, stderr: "" };
-  const target = resolve(directory, evaluationCase.simulation.file);
+export async function runSimulation(directory: string, patch?: SimulationPatch): Promise<{ exitCode: number; stderr: string }> {
+  if (!patch) return { exitCode: 1, stderr: "" };
+  const target = resolve(directory, patch.file);
   if (relative(directory, target).startsWith("..")) return { exitCode: 1, stderr: "" };
   let original: string;
   try {
@@ -172,8 +245,8 @@ export async function runSimulation(directory: string, evaluationCase: Evaluatio
   } catch {
     return { exitCode: 1, stderr: "" };
   }
-  if (!original.includes(evaluationCase.simulation.search)) return { exitCode: 1, stderr: "" };
-  await fs.writeFile(target, original.replace(evaluationCase.simulation.search, evaluationCase.simulation.replacement), "utf8");
+  if (!original.includes(patch.search)) return { exitCode: 1, stderr: "" };
+  await fs.writeFile(target, original.replace(patch.search, patch.replacement), "utf8");
   return { exitCode: 0, stderr: "" };
 }
 
@@ -220,7 +293,7 @@ async function run(command: string, args: string[], options: { cwd?: string; all
 }
 
 function parseArguments(argumentsList: string[]): Options {
-  const options: Options = { live: false, simulated: false, manifestPath: resolve("evals/baseline-manifest.json"), resultsDirectory: resolve("evals/results"), ref: "HEAD", iterations: 1 };
+  const options: Options = { live: false, simulated: false, manifestPath: resolve("evals/baseline-manifest.json"), resultsDirectory: resolve("evals/results"), ref: "HEAD", iterations: 1, selector: "deterministic", modelDeckBaseUrl: "http://127.0.0.1:8600/v1", modelDeckModel: "codex-router-simulation-selector", selectorTimeoutMs: 15_000 };
   for (let index = 0; index < argumentsList.length; index++) {
     const argument = argumentsList[index];
     if (argument === "--live") options.live = true;
@@ -230,9 +303,18 @@ function parseArguments(argumentsList: string[]): Options {
     else if (argument === "--ref") options.ref = requiredValue(argumentsList, ++index, argument);
     else if (argument === "--case") options.caseId = requiredValue(argumentsList, ++index, argument);
     else if (argument === "--iterations") options.iterations = positiveInteger(requiredValue(argumentsList, ++index, argument), argument);
+    else if (argument === "--selector") options.selector = simulationSelectorKind(requiredValue(argumentsList, ++index, argument));
+    else if (argument === "--modeldeck-base-url") options.modelDeckBaseUrl = requiredValue(argumentsList, ++index, argument);
+    else if (argument === "--modeldeck-model") options.modelDeckModel = requiredValue(argumentsList, ++index, argument);
+    else if (argument === "--selector-timeout-ms") options.selectorTimeoutMs = positiveInteger(requiredValue(argumentsList, ++index, argument), argument);
     else throw new Error(`Unknown argument: ${argument}.`);
   }
   return options;
+}
+
+function simulationSelectorKind(value: string): SimulationSelectorKind {
+  if (value === "deterministic" || value === "modeldeck") return value;
+  throw new Error("--selector must be deterministic or modeldeck.");
 }
 
 function positiveInteger(value: string, option: string): number {

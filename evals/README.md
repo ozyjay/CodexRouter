@@ -24,6 +24,20 @@ npm run eval:baseline:sim -- --iterations 3
 
 Simulation uses the case's declared local patch instead of calling Codex, then runs the same worktree, validation, diff, mutation, and reporting gates. It creates temporary worktrees and a report but never starts the App Server or consumes ChatGPT allowance. Reports are labelled `executionBackend: "simulated"`; they validate the evaluation system only and must not be compared with, or used to make claims about, Codex models.
 
+### ModelDeck simulation selector
+
+To test whether a local selector chooses the declared deterministic simulation tiers, run:
+
+```bash
+npm run eval:baseline:sim -- \
+  --selector modeldeck \
+  --modeldeck-model codex-router-simulation-selector
+```
+
+The selector receives only the evaluation task and compact metadata. It selects `sim-small`, `sim-balanced`, or `sim-strong`; the harness then applies that case's declared deterministic patch for the selected tier and runs the ordinary gates. It records the public selector model ID, the live local Worker identity, latency, selected tier, and fallback status, but never the prompt, response, patch, or source code. A timeout, unavailable route, malformed response, or unknown tier uses deterministic `sim-balanced` and records only that fallback occurred.
+
+`--selector modeldeck` performs local ModelDeck inference but does not start Codex or consume ChatGPT allowance. It is a selector-quality and harness test, not an evaluation of the local proxy models or Codex allocations.
+
 ## Live comparison
 
 ```bash

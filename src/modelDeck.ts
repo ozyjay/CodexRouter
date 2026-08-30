@@ -1,4 +1,5 @@
 import { RoutingInput, RoutingRecommendation } from "./contracts";
+import { SimulationProfile } from "./evaluation";
 import { isValidRecommendation } from "./routing";
 
 export interface ModelDeckConfig {
@@ -10,6 +11,23 @@ export interface ModelDeckConfig {
 interface ModelDeckModel {
   id: string;
   ready?: boolean;
+  revision?: string;
+  modeldeck?: { model_id?: string };
+}
+
+export interface SimulationSelectorInput {
+  task: string;
+  taskCategory: string;
+  estimatedFilesAffected: number;
+  testsRequested: boolean;
+  riskFlags: string[];
+}
+
+export interface SimulationSelectorRecommendation {
+  simulationProfile: SimulationProfile;
+  confidence: number;
+  rationale: string;
+  model: { publicModelId: string; localModelId?: string; revision?: string };
 }
 
 export class ModelDeckProvider {
@@ -18,15 +36,12 @@ export class ModelDeckProvider {
   }
 
   async discoverModels(): Promise<string[]> {
-    const response = await this.request("models", { method: "GET" });
-    const payload = await response.json() as { data?: ModelDeckModel[] };
-    if (!Array.isArray(payload.data)) throw new Error("ModelDeck returned an invalid /models response.");
-    return payload.data.filter((model) => model.ready !== false).map((model) => model.id).filter(Boolean);
+    return (await this.discoverReadyModels()).map((model) => model.id);
   }
 
   async classify(input: RoutingInput): Promise<RoutingRecommendation> {
-    const discovered = await this.discoverModels();
-    const model = this.config.routerModel || discovered[0];
+    const discovered = await this.discoverReadyModels();
+    const model = this.config.routerModel || discovered[0]?.id;
     if (!model) throw new Error("ModelDeck did not report a ready local routing model.");
 
     const response = await this.request("chat/completions", {
@@ -49,6 +64,45 @@ export class ModelDeckProvider {
     const candidate = parseJsonObject(content);
     if (!isValidRecommendation(candidate)) throw new Error("ModelDeck returned an invalid routing recommendation.");
     return { ...candidate, source: "local-model" };
+  }
+
+  async selectSimulationProfile(input: SimulationSelectorInput): Promise<SimulationSelectorRecommendation> {
+    const discovered = await this.discoverReadyModels();
+    const model = this.config.routerModel || discovered[0]?.id;
+    if (!model) throw new Error("ModelDeck did not report a ready local simulation selector.");
+    const selectedModel = discovered.find((candidate) => candidate.id === model);
+    if (!selectedModel) throw new Error("The configured ModelDeck simulation selector is not ready.");
+
+    const response = await this.request("chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        temperature: 0,
+        max_tokens: 128,
+        messages: [
+          { role: "system", content: SIMULATION_SELECTOR_PROMPT },
+          { role: "user", content: JSON.stringify(input) }
+        ]
+      })
+    });
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const content = payload.choices?.[0]?.message?.content;
+    if (typeof content !== "string") throw new Error("ModelDeck returned no simulation-selector content.");
+    const candidate = parseJsonObject(content);
+    if (!isValidSimulationSelectorRecommendation(candidate)) throw new Error("ModelDeck returned an invalid simulation-selector response.");
+    return {
+      ...candidate,
+      model: { publicModelId: model, localModelId: selectedModel.modeldeck?.model_id, revision: selectedModel.revision }
+    };
+  }
+
+  private async discoverReadyModels(): Promise<ModelDeckModel[]> {
+    const response = await this.request("models", { method: "GET" });
+    const payload = await response.json() as { data?: ModelDeckModel[] };
+    if (!Array.isArray(payload.data)) throw new Error("ModelDeck returned an invalid /models response.");
+    return payload.data.filter((model) => model.ready !== false && typeof model.id === "string" && model.id.length > 0);
   }
 
   private async request(path: string, init: RequestInit): Promise<Response> {
@@ -83,6 +137,22 @@ function parseJsonObject(content: string): unknown {
   return JSON.parse(fenced.trim());
 }
 
+function isValidSimulationSelectorRecommendation(value: unknown): value is Omit<SimulationSelectorRecommendation, "model"> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  const expected = ["simulationProfile", "confidence", "rationale"];
+  if (Object.keys(candidate).length !== expected.length || !expected.every((key) => key in candidate)) return false;
+  return ["sim-small", "sim-balanced", "sim-strong"].includes(candidate.simulationProfile as string)
+    && typeof candidate.confidence === "number"
+    && Number.isFinite(candidate.confidence)
+    && candidate.confidence >= 0
+    && candidate.confidence <= 1
+    && typeof candidate.rationale === "string"
+    && candidate.rationale.trim().length > 0
+    && candidate.rationale.length <= 160
+    && !/[\r\n]/.test(candidate.rationale);
+}
+
 const ROUTER_PROMPT = `You are a local task-routing classifier. Return only one JSON object with exactly these fields:
 taskType: implementation|debugging|documentation|testing|refactor|other;
 scope: narrow|medium|broad;
@@ -95,3 +165,9 @@ confidence: number from 0 to 1;
 reasons: array of at most 3 concise strings, each under 240 characters;
 escalationSignals: array of at most 4 concise strings.
 You provide advice only. Do not include source code, credentials, repository content, markdown, or prose outside the JSON object.`;
+
+const SIMULATION_SELECTOR_PROMPT = `You are a local simulation-tier selector for a deterministic evaluation harness. Return only one JSON object with exactly these fields:
+simulationProfile: sim-small|sim-balanced|sim-strong;
+confidence: number from 0 to 1;
+rationale: a concise explanation of at most 160 characters.
+Choose sim-small for focused, low-risk work; sim-balanced for ordinary bounded changes; sim-strong for ambiguous, broad, destructive, security-sensitive, or high-risk work. You select a declared deterministic scenario only. Do not propose commands, patches, source code, paths, credentials, Markdown, or prose outside the JSON object.`;

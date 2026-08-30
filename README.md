@@ -125,6 +125,8 @@ The test suite uses fake App Server and ModelDeck transports; it makes no Codex 
 
 `npm run eval:baseline` performs a no-side-effect dry run of the fixed single-model versus Explorer/Worker/Reviewer evaluation manifest. Use `npm run eval:baseline:sim` for a deterministic, no-allowance worktree evaluation that tests the harness only. A live run requires an explicit `--live` flag, validates every allocation against the live App Server catalogue, uses detached temporary worktrees, and consumes ChatGPT Codex allowance. Use `--iterations 3` for matched repeated trials. See [the baseline evaluation guide](evals/README.md) for configuration and safeguards.
 
+To test the optional local ModelDeck simulation selector without a Codex turn, use `npm run eval:baseline:sim -- --selector modeldeck --modeldeck-model codex-router-simulation-selector`. The selector only chooses a declared deterministic tier; malformed, unavailable, or timed-out selector responses visibly fall back to `sim-balanced`.
+
 ### Opt-in manual smoke test
 
 This starts a real Codex turn and consumes the user’s ChatGPT Codex allowance:

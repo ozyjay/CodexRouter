@@ -3,6 +3,8 @@ import { CodexModel, ReasoningEffort } from "./contracts";
 export type EvaluationStrategy = "single-model" | "fixed-roles";
 export type EvaluationExecutionBackend = "codex" | "simulated";
 export type EvaluationFailureKind = "authentication" | "cli-configuration" | "model-allocation" | "worktree" | "simulation" | "startup-or-runtime";
+export const SIMULATION_PROFILES = ["sim-small", "sim-balanced", "sim-strong"] as const;
+export type SimulationProfile = (typeof SIMULATION_PROFILES)[number];
 
 export interface Allocation {
   model: string;
@@ -39,6 +41,15 @@ export interface SimulationPatch {
   replacement: string;
 }
 
+export interface SimulationRunMetadata {
+  selectedProfile: SimulationProfile;
+  appliedProfile: SimulationProfile;
+  selector: "deterministic" | "modeldeck";
+  fallback: boolean;
+  selectorDurationMs?: number;
+  selectorModel?: { publicModelId: string; localModelId?: string; revision?: string };
+}
+
 export interface EvaluationCase {
   id: string;
   prompt: string;
@@ -46,6 +57,7 @@ export interface EvaluationCase {
   expectation?: DiffExpectation;
   mutation?: MutationCheck;
   simulation?: SimulationPatch;
+  simulationProfiles?: Partial<Record<SimulationProfile, SimulationPatch>>;
 }
 
 export interface EvaluationManifest {
@@ -69,6 +81,7 @@ export interface EvaluationRunResult {
   changedFiles: boolean;
   completedAt: string;
   failureKind?: EvaluationFailureKind;
+  simulation?: SimulationRunMetadata;
 }
 
 export interface EvaluationSummary {
@@ -111,6 +124,7 @@ export function validateEvaluationManifest(value: unknown): string[] {
     if (candidate.expectation !== undefined && !isDiffExpectation(candidate.expectation)) errors.push(`cases[${index}] expectation must name a relative file and at least one required pattern.`);
     if (candidate.mutation !== undefined && !isMutationCheck(candidate.mutation)) errors.push(`cases[${index}] mutation must name a relative file, a non-empty search string, a replacement, and a validation command.`);
     if (candidate.simulation !== undefined && !isSimulationPatch(candidate.simulation)) errors.push(`cases[${index}] simulation must name a relative file, a non-empty search string, and a replacement.`);
+    if (candidate.simulationProfiles !== undefined && !isSimulationProfiles(candidate.simulationProfiles)) errors.push(`cases[${index}] simulationProfiles must map recognised simulation profiles to safe deterministic patches.`);
   }
   return errors;
 }
@@ -142,6 +156,13 @@ export function roleAgentFiles(roles: FixedRoleAllocations): Record<string, stri
     "router-baseline-worker.toml": renderAgent("router_baseline_worker", "Implementation worker for the fixed routing baseline.", roles.worker, "workspace-write", "Implement the smallest defensible change using the explorer's evidence. Keep unrelated files untouched and run focused validation."),
     "router-baseline-reviewer.toml": renderAgent("router_baseline_reviewer", "Read-only reviewer for the fixed routing baseline.", roles.reviewer, "read-only", "Review the resulting diff for correctness, security, behaviour regressions, and missing tests. Report concrete findings only. Do not edit files.")
   };
+}
+
+export function simulationPatchForProfile(evaluationCase: EvaluationCase, requestedProfile: SimulationProfile): { profile: SimulationProfile; patch?: SimulationPatch } {
+  const configured = evaluationCase.simulationProfiles?.[requestedProfile];
+  if (configured) return { profile: requestedProfile, patch: configured };
+  if (evaluationCase.simulation) return { profile: "sim-balanced", patch: evaluationCase.simulation };
+  return { profile: requestedProfile };
 }
 
 export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): EvaluationSummary {
@@ -271,6 +292,11 @@ function isSimulationPatch(value: unknown): value is SimulationPatch {
     && typeof value.search === "string"
     && value.search.length > 0
     && typeof value.replacement === "string";
+}
+
+function isSimulationProfiles(value: unknown): value is Partial<Record<SimulationProfile, SimulationPatch>> {
+  if (!isRecord(value)) return false;
+  return Object.entries(value).every(([profile, patch]) => SIMULATION_PROFILES.includes(profile as SimulationProfile) && isSimulationPatch(patch));
 }
 
 function isSafeRelativeFile(value: unknown): value is string {

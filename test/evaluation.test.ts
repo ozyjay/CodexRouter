@@ -4,7 +4,7 @@ import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { CodexModel } from "../src/contracts";
-import { EvaluationManifest, buildPrompt, classifyCodexFailure, roleAgentFiles, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
+import { EvaluationManifest, buildPrompt, classifyCodexFailure, roleAgentFiles, simulationPatchForProfile, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
 import { allocationsForRun, linkInstalledDependencies, runMutationCheck, runSimulation } from "../scripts/baseline-eval";
 
 const manifest: EvaluationManifest = {
@@ -75,11 +75,20 @@ test("simulated execution applies only its declared deterministic patch", async 
   try {
     await writeFile(join(directory, "test-routing.test.ts"), "original", "utf8");
     const simulation = { ...evaluationCase.simulation!, file: "test-routing.test.ts" };
-    assert.equal((await runSimulation(directory, { ...evaluationCase, simulation })).exitCode, 0);
+    assert.equal((await runSimulation(directory, simulation)).exitCode, 0);
     assert.equal(await readFile(join(directory, "test-routing.test.ts"), "utf8"), "simulated");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("simulation profiles select only declared deterministic patches", () => {
+  const selected = simulationPatchForProfile({ ...manifest.cases[0], simulationProfiles: { "sim-small": { file: "test/routing.test.ts", search: "small", replacement: "small-result" } } }, "sim-small");
+  assert.equal(selected.profile, "sim-small");
+  assert.equal(selected.patch?.replacement, "small-result");
+  const fallback = simulationPatchForProfile(manifest.cases[0], "sim-strong");
+  assert.equal(fallback.profile, "sim-balanced");
+  assert.equal(fallback.patch, manifest.cases[0].simulation);
 });
 
 test("simulated execution fails safely when its patch cannot be applied", async () => {
@@ -88,7 +97,7 @@ test("simulated execution fails safely when its patch cannot be applied", async 
   try {
     await writeFile(join(directory, "test-routing.test.ts"), "original", "utf8");
     const simulation = { ...evaluationCase.simulation!, file: "test-routing.test.ts", search: "missing" };
-    assert.equal((await runSimulation(directory, { ...evaluationCase, simulation })).exitCode, 1);
+    assert.equal((await runSimulation(directory, simulation)).exitCode, 1);
     assert.equal(await readFile(join(directory, "test-routing.test.ts"), "utf8"), "original");
   } finally {
     await rm(directory, { recursive: true, force: true });

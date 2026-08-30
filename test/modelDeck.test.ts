@@ -16,3 +16,39 @@ test("ModelDeck malformed responses are rejected", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("ModelDeck simulation selector returns only its bounded contract and model identity", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  globalThis.fetch = (async () => {
+    requestCount++;
+    if (requestCount === 1) {
+      return new Response(JSON.stringify({ data: [{ id: "codex-router-simulation-selector", ready: true, revision: "abc", modeldeck: { model_id: "local/selector" } }] }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ choices: [{ message: { content: "{\"simulationProfile\":\"sim-small\",\"confidence\":0.82,\"rationale\":\"Focused test change.\"}" } }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", routerModel: "codex-router-simulation-selector", timeoutMs: 1_000 });
+    const recommendation = await provider.selectSimulationProfile({ task: "Add one test.", taskCategory: "testing", estimatedFilesAffected: 1, testsRequested: true, riskFlags: [] });
+    assert.deepEqual(recommendation, { simulationProfile: "sim-small", confidence: 0.82, rationale: "Focused test change.", model: { publicModelId: "codex-router-simulation-selector", localModelId: "local/selector", revision: "abc" } });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ModelDeck simulation selector rejects unbounded output", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  globalThis.fetch = (async () => {
+    requestCount++;
+    return new Response(JSON.stringify(requestCount === 1
+      ? { data: [{ id: "codex-router-simulation-selector", ready: true }] }
+      : { choices: [{ message: { content: "{\"simulationProfile\":\"sim-small\",\"confidence\":0.8,\"rationale\":\"Fine.\",\"patch\":\"forbidden\"}" } }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", routerModel: "codex-router-simulation-selector", timeoutMs: 1_000 });
+    await assert.rejects(provider.selectSimulationProfile({ task: "Add one test.", taskCategory: "testing", estimatedFilesAffected: 1, testsRequested: true, riskFlags: [] }), /invalid simulation-selector/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
