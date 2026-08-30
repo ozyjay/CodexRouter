@@ -52,3 +52,51 @@ test("ModelDeck simulation selector rejects unbounded output", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("ModelDeck proxy candidates are restricted to declared contextual files and patches", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  globalThis.fetch = (async () => {
+    requestCount++;
+    return new Response(JSON.stringify(requestCount === 1
+      ? { data: [{ id: "codex-router-proxy-strong", ready: true, revision: "proxy-revision", modeldeck: { model_id: "local/proxy" } }] }
+      : { choices: [{ message: { content: "{\"patches\":[{\"file\":\"test/routing.test.ts\",\"search\":\"original\",\"replacement\":\"updated\"}]}" } }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
+    const candidate = await provider.generateProxyCandidate("codex-router-proxy-strong", {
+      task: "Update one test.",
+      allowedFiles: ["test/routing.test.ts", "src/routing.ts"],
+      context: [{ file: "test/routing.test.ts", content: "original" }],
+      maxPatches: 1
+    });
+    assert.deepEqual(candidate, {
+      patches: [{ file: "test/routing.test.ts", search: "original", replacement: "updated" }],
+      model: { publicModelId: "codex-router-proxy-strong", localModelId: "local/proxy", revision: "proxy-revision" }
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ModelDeck proxy candidates reject edits outside supplied context", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  globalThis.fetch = (async () => {
+    requestCount++;
+    return new Response(JSON.stringify(requestCount === 1
+      ? { data: [{ id: "codex-router-proxy-strong", ready: true }] }
+      : { choices: [{ message: { content: "{\"patches\":[{\"file\":\"src/routing.ts\",\"search\":\"original\",\"replacement\":\"updated\"}]}" } }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
+    await assert.rejects(provider.generateProxyCandidate("codex-router-proxy-strong", {
+      task: "Update one test.",
+      allowedFiles: ["test/routing.test.ts", "src/routing.ts"],
+      context: [{ file: "test/routing.test.ts", content: "original" }],
+      maxPatches: 1
+    }), /invalid constrained proxy candidate/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

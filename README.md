@@ -129,6 +129,8 @@ To test the optional local ModelDeck simulation selector without a Codex turn, u
 
 The simulation summary also records the match rate for manifest cases with an explicit expected simulation tier. This measures selector calibration only; it does not attribute quality or performance to a Codex or local proxy model.
 
+For a constrained local proxy-candidate run, use `npm run eval:baseline -- --slm-proxy --selector modeldeck --modeldeck-model codex-router-simulation-selector --case focused-regression-test`. The manifest must explicitly limit both context and writable files; malformed, out-of-scope, or inapplicable candidates fail without deterministic fallback. Results are labelled `slm-proxy` and are evidence about the configured local proxies only, never Codex allocations or performance.
+
 ### Opt-in manual smoke test
 
 This starts a real Codex turn and consumes the user’s ChatGPT Codex allowance:

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { CodexModel } from "../src/contracts";
 import { EvaluationManifest, buildPrompt, classifyCodexFailure, roleAgentFiles, simulationPatchForProfile, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
-import { allocationsForRun, linkInstalledDependencies, runMutationCheck, runSimulation } from "../scripts/baseline-eval";
+import { allocationsForRun, linkInstalledDependencies, readProxyContext, runMutationCheck, runSimulation } from "../scripts/baseline-eval";
 
 const manifest: EvaluationManifest = {
   version: 1,
@@ -71,6 +71,25 @@ test("evaluation manifest accepts only safe, meaningful diff expectations", () =
   assert.match(validateEvaluationManifest(invalid).join(" "), /expectation.*mutation.*simulation/);
 });
 
+test("evaluation manifest accepts bounded proxy constraints only", () => {
+  const constrained = { ...manifest, cases: [{ ...manifest.cases[0], proxy: { allowedFiles: ["test/routing.test.ts"], contextFiles: ["test/routing.test.ts"], maxPatches: 1, maxContextChars: 512 } }] };
+  assert.deepEqual(validateEvaluationManifest(constrained), []);
+  const invalid = { ...constrained, cases: [{ ...constrained.cases[0], proxy: { allowedFiles: ["test/routing.test.ts"], contextFiles: ["src/routing.ts"], maxPatches: 0 } }] };
+  assert.match(validateEvaluationManifest(invalid).join(" "), /proxy/);
+});
+
+test("proxy context reads only declared files within its character budget", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-router-proxy-context-test-"));
+  try {
+    await writeFile(join(directory, "allowed.txt"), "declared", "utf8");
+    const context = await readProxyContext(directory, { allowedFiles: ["allowed.txt"], contextFiles: ["allowed.txt"], maxContextChars: 16 });
+    assert.deepEqual(context, [{ file: "allowed.txt", content: "declared" }]);
+    await assert.rejects(readProxyContext(directory, { allowedFiles: ["allowed.txt"], contextFiles: ["allowed.txt"], maxContextChars: 3 }), /character limit/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("simulated execution applies only its declared deterministic patch", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-router-simulation-test-"));
   const evaluationCase = manifest.cases[0];
@@ -132,6 +151,7 @@ test("simulated execution fails safely when its patch cannot be applied", async 
 test("simulated runs do not attribute allocations to Codex models", () => {
   assert.deepEqual(allocationsForRun(manifest, "single-model", "simulated"), {});
   assert.deepEqual(allocationsForRun(manifest, "fixed-roles", "simulated"), {});
+  assert.deepEqual(allocationsForRun(manifest, "single-model", "slm-proxy"), {});
   assert.deepEqual(allocationsForRun(manifest, "single-model", "codex"), { singleModel: manifest.singleModel });
 });
 

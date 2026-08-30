@@ -30,6 +30,18 @@ export interface SimulationSelectorRecommendation {
   model: { publicModelId: string; localModelId?: string; revision?: string };
 }
 
+export interface ProxyCandidateInput {
+  task: string;
+  allowedFiles: string[];
+  context: Array<{ file: string; content: string }>;
+  maxPatches: number;
+}
+
+export interface ProxyCandidate {
+  patches: Array<{ file: string; search: string; replacement: string }>;
+  model: { publicModelId: string; localModelId?: string; revision?: string };
+}
+
 export class ModelDeckProvider {
   public constructor(private readonly config: ModelDeckConfig) {
     assertLoopbackUrl(config.baseUrl);
@@ -98,6 +110,36 @@ export class ModelDeckProvider {
     };
   }
 
+  async generateProxyCandidate(model: string, input: ProxyCandidateInput): Promise<ProxyCandidate> {
+    if (!isValidProxyCandidateInput(input)) throw new Error("Invalid constrained proxy-candidate input.");
+    const discovered = await this.discoverReadyModels();
+    const selectedModel = discovered.find((candidate) => candidate.id === model);
+    if (!selectedModel) throw new Error("The configured ModelDeck proxy model is not ready.");
+    const response = await this.request("chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        temperature: 0,
+        max_tokens: 512,
+        messages: [
+          { role: "system", content: PROXY_CANDIDATE_PROMPT },
+          { role: "user", content: JSON.stringify(input) }
+        ]
+      })
+    });
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const content = payload.choices?.[0]?.message?.content;
+    if (typeof content !== "string") throw new Error("ModelDeck returned no proxy-candidate content.");
+    const candidate = parseJsonObject(content);
+    if (!isValidProxyCandidate(candidate, input)) throw new Error("ModelDeck returned an invalid constrained proxy candidate.");
+    return {
+      patches: candidate.patches,
+      model: { publicModelId: model, localModelId: selectedModel.modeldeck?.model_id, revision: selectedModel.revision }
+    };
+  }
+
   private async discoverReadyModels(): Promise<ModelDeckModel[]> {
     const response = await this.request("models", { method: "GET" });
     const payload = await response.json() as { data?: ModelDeckModel[] };
@@ -153,6 +195,41 @@ function isValidSimulationSelectorRecommendation(value: unknown): value is Omit<
     && !/[\r\n]/.test(candidate.rationale);
 }
 
+function isValidProxyCandidateInput(value: ProxyCandidateInput): boolean {
+  return typeof value.task === "string"
+    && value.task.trim().length > 0
+    && Array.isArray(value.allowedFiles)
+    && value.allowedFiles.length > 0
+    && value.allowedFiles.every(isSafeRelativeFile)
+    && new Set(value.allowedFiles).size === value.allowedFiles.length
+    && Array.isArray(value.context)
+    && value.context.length > 0
+    && value.context.every((entry) => isRecord(entry) && value.allowedFiles.includes(entry.file as string) && typeof entry.content === "string")
+    && Number.isInteger(value.maxPatches)
+    && value.maxPatches >= 1
+    && value.maxPatches <= 8;
+}
+
+function isValidProxyCandidate(value: unknown, input: ProxyCandidateInput): value is { patches: Array<{ file: string; search: string; replacement: string }> } {
+  if (!isRecord(value) || Object.keys(value).length !== 1 || !Array.isArray(value.patches) || value.patches.length < 1 || value.patches.length > input.maxPatches) return false;
+  const contextFiles = new Set(input.context.map((entry) => entry.file));
+  const files = new Set<string>();
+  return value.patches.every((patch) => {
+    if (!isRecord(patch) || Object.keys(patch).length !== 3 || !isSafeRelativeFile(patch.file) || !input.allowedFiles.includes(patch.file) || !contextFiles.has(patch.file) || files.has(patch.file)) return false;
+    files.add(patch.file);
+    return typeof patch.search === "string" && patch.search.length > 0 && patch.search.length <= 12_000
+      && typeof patch.replacement === "string" && patch.replacement.length <= 16_000;
+  });
+}
+
+function isSafeRelativeFile(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 256 && !value.startsWith("/") && !value.split("/").includes("..");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 const ROUTER_PROMPT = `You are a local task-routing classifier. Return only one JSON object with exactly these fields:
 taskType: implementation|debugging|documentation|testing|refactor|other;
 scope: narrow|medium|broad;
@@ -171,3 +248,11 @@ simulationProfile: sim-small|sim-balanced|sim-strong;
 confidence: number from 0 to 1;
 rationale: a concise explanation of at most 160 characters.
 Choose sim-small for focused, low-risk work; sim-balanced for ordinary bounded changes; sim-strong for ambiguous, broad, destructive, security-sensitive, or high-risk work. You select a declared deterministic scenario only. Do not propose commands, patches, source code, paths, credentials, Markdown, or prose outside the JSON object.`;
+
+const PROXY_CANDIDATE_PROMPT = `You are a constrained local proxy in an evaluation harness. Return only one JSON object with exactly this field:
+patches: an array of one to the supplied maximum number of patch objects.
+Every patch object must have exactly these fields:
+file: one of the supplied allowedFiles;
+search: an exact non-empty unique text fragment from that file's supplied context;
+replacement: replacement text for the first occurrence only.
+Use only the supplied task and context. Do not add files, commands, explanations, Markdown, credentials, paths outside allowedFiles, or prose outside the JSON object. If the requested change cannot be made safely from the supplied context, return {"patches":[]}.`;

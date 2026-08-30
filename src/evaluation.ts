@@ -1,8 +1,8 @@
 import { CodexModel, ReasoningEffort } from "./contracts";
 
 export type EvaluationStrategy = "single-model" | "fixed-roles";
-export type EvaluationExecutionBackend = "codex" | "simulated";
-export type EvaluationFailureKind = "authentication" | "cli-configuration" | "model-allocation" | "worktree" | "simulation" | "startup-or-runtime";
+export type EvaluationExecutionBackend = "codex" | "simulated" | "slm-proxy";
+export type EvaluationFailureKind = "authentication" | "cli-configuration" | "model-allocation" | "worktree" | "simulation" | "proxy" | "startup-or-runtime";
 export const SIMULATION_PROFILES = ["sim-small", "sim-balanced", "sim-strong"] as const;
 export type SimulationProfile = (typeof SIMULATION_PROFILES)[number];
 
@@ -58,6 +58,21 @@ export interface SimulationRunMetadata {
   selectorModel?: { publicModelId: string; localModelId?: string; revision?: string };
 }
 
+export interface ProxyCandidateConfig {
+  allowedFiles: string[];
+  contextFiles: string[];
+  maxPatches?: number;
+  maxContextChars?: number;
+}
+
+export interface ProxyRunMetadata {
+  selectedProfile: SimulationProfile;
+  status: "applied" | "unavailable" | "invalid" | "inapplicable" | "context-error";
+  model?: { publicModelId: string; localModelId?: string; revision?: string };
+  candidateDurationMs: number;
+  patchCount?: number;
+}
+
 export interface EvaluationCase {
   id: string;
   prompt: string;
@@ -68,6 +83,7 @@ export interface EvaluationCase {
   simulationProfiles?: Partial<Record<SimulationProfile, SimulationScenario>>;
   expectedSimulationProfile?: SimulationProfile;
   estimatedFilesAffected?: number;
+  proxy?: ProxyCandidateConfig;
 }
 
 export interface EvaluationManifest {
@@ -92,6 +108,7 @@ export interface EvaluationRunResult {
   completedAt: string;
   failureKind?: EvaluationFailureKind;
   simulation?: SimulationRunMetadata;
+  proxy?: ProxyRunMetadata;
 }
 
 export interface EvaluationSummary {
@@ -140,6 +157,7 @@ export function validateEvaluationManifest(value: unknown): string[] {
     if (candidate.simulationProfiles !== undefined && !isSimulationProfiles(candidate.simulationProfiles)) errors.push(`cases[${index}] simulationProfiles must map recognised simulation profiles to safe deterministic patches.`);
     if (candidate.expectedSimulationProfile !== undefined && !SIMULATION_PROFILES.includes(candidate.expectedSimulationProfile as SimulationProfile)) errors.push(`cases[${index}] expectedSimulationProfile must be sim-small, sim-balanced, or sim-strong.`);
     if (candidate.estimatedFilesAffected !== undefined && (typeof candidate.estimatedFilesAffected !== "number" || !Number.isInteger(candidate.estimatedFilesAffected) || candidate.estimatedFilesAffected < 1 || candidate.estimatedFilesAffected > 32)) errors.push(`cases[${index}] estimatedFilesAffected must be an integer from 1 to 32.`);
+    if (candidate.proxy !== undefined && !isProxyCandidateConfig(candidate.proxy)) errors.push(`cases[${index}] proxy must declare unique safe allowedFiles and contextFiles, with context files limited to allowed files.`);
   }
   return errors;
 }
@@ -326,6 +344,21 @@ function isSimulationProfiles(value: unknown): value is Partial<Record<Simulatio
 function isSimulationScenario(value: unknown): value is SimulationScenario {
   return isSimulationPatch(value)
     || (isRecord(value) && Array.isArray(value.patches) && value.patches.length > 0 && value.patches.every(isSimulationPatch));
+}
+
+function isProxyCandidateConfig(value: unknown): value is ProxyCandidateConfig {
+  if (!isRecord(value)) return false;
+  const allowedFiles = value.allowedFiles;
+  const contextFiles = value.contextFiles;
+  if (!isSafeFileList(allowedFiles)
+    || !isSafeFileList(contextFiles)
+    || !contextFiles.every((file) => allowedFiles.includes(file))) return false;
+  return (value.maxPatches === undefined || (typeof value.maxPatches === "number" && Number.isInteger(value.maxPatches) && value.maxPatches >= 1 && value.maxPatches <= 8))
+    && (value.maxContextChars === undefined || (typeof value.maxContextChars === "number" && Number.isInteger(value.maxContextChars) && value.maxContextChars >= 256 && value.maxContextChars <= 48_000));
+}
+
+function isSafeFileList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length > 0 && value.every(isSafeRelativeFile) && new Set(value).size === value.length;
 }
 
 function isSafeRelativeFile(value: unknown): value is string {
