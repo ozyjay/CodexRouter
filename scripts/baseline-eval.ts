@@ -49,7 +49,19 @@ async function main(): Promise<void> {
       }
     }
   }
-  const report = { version: 2, generatedAt: new Date().toISOString(), ref: options.ref, executionBackend, runs, summary: summariseEvaluationRuns(runs) };
+  const report = {
+    version: 3,
+    generatedAt: new Date().toISOString(),
+    ref: options.ref,
+    executionBackend,
+    simulation: executionBackend === "simulated" ? {
+      purpose: "Validate evaluation-harness isolation, quality gates, reporting, and failure accounting without a Codex turn.",
+      allocationAttribution: "none",
+      performanceAttribution: "none"
+    } : undefined,
+    runs,
+    summary: summariseEvaluationRuns(runs)
+  };
   await fs.mkdir(options.resultsDirectory, { recursive: true });
   const resultPath = join(options.resultsDirectory, `baseline-${report.generatedAt.replace(/[:.]/g, "-")}.json`);
   await fs.writeFile(resultPath, `${JSON.stringify(report, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
@@ -80,12 +92,7 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
       iteration,
       strategy,
       executionBackend,
-      allocations: strategy === "single-model" ? { singleModel: manifest.singleModel } : {
-        parent: manifest.fixedRoles.parent,
-        explorer: manifest.fixedRoles.explorer,
-        worker: manifest.fixedRoles.worker,
-        reviewer: manifest.fixedRoles.reviewer
-      },
+      allocations: allocationsForRun(manifest, strategy, executionBackend),
       durationMs: Date.now() - startedAt,
       executionExitCode,
       validationExitCode,
@@ -98,6 +105,16 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
   } finally {
     await run("git", ["worktree", "remove", "--force", directory], { allowNonZero: true, suppressOutput: true });
   }
+}
+
+export function allocationsForRun(manifest: EvaluationManifest, strategy: EvaluationStrategy, executionBackend: EvaluationExecutionBackend): Record<string, { model: string; effort: string }> {
+  if (executionBackend === "simulated") return {};
+  return strategy === "single-model" ? { singleModel: manifest.singleModel } : {
+    parent: manifest.fixedRoles.parent,
+    explorer: manifest.fixedRoles.explorer,
+    worker: manifest.fixedRoles.worker,
+    reviewer: manifest.fixedRoles.reviewer
+  };
 }
 
 async function runValidation(directory: string, evaluationCase: EvaluationCase): Promise<number> {

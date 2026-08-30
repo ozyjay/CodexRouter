@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { CodexModel } from "../src/contracts";
 import { EvaluationManifest, buildPrompt, classifyCodexFailure, roleAgentFiles, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
-import { linkInstalledDependencies, runMutationCheck, runSimulation } from "../scripts/baseline-eval";
+import { allocationsForRun, linkInstalledDependencies, runMutationCheck, runSimulation } from "../scripts/baseline-eval";
 
 const manifest: EvaluationManifest = {
   version: 1,
@@ -82,6 +82,25 @@ test("simulated execution applies only its declared deterministic patch", async 
   }
 });
 
+test("simulated execution fails safely when its patch cannot be applied", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-router-simulation-test-"));
+  const evaluationCase = manifest.cases[0];
+  try {
+    await writeFile(join(directory, "test-routing.test.ts"), "original", "utf8");
+    const simulation = { ...evaluationCase.simulation!, file: "test-routing.test.ts", search: "missing" };
+    assert.equal((await runSimulation(directory, { ...evaluationCase, simulation })).exitCode, 1);
+    assert.equal(await readFile(join(directory, "test-routing.test.ts"), "utf8"), "original");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("simulated runs do not attribute allocations to Codex models", () => {
+  assert.deepEqual(allocationsForRun(manifest, "single-model", "simulated"), {});
+  assert.deepEqual(allocationsForRun(manifest, "fixed-roles", "simulated"), {});
+  assert.deepEqual(allocationsForRun(manifest, "single-model", "codex"), { singleModel: manifest.singleModel });
+});
+
 test("mutation checks restore the candidate worktree after evaluating it", async () => {
   const directory = await mkdtemp(join(tmpdir(), "codex-router-mutation-test-"));
   const evaluationCase = manifest.cases[0];
@@ -89,6 +108,19 @@ test("mutation checks restore the candidate worktree after evaluating it", async
     await writeFile(join(directory, "src-routing.ts"), "original", "utf8");
     const mutation = { ...evaluationCase.mutation!, file: "src-routing.ts" };
     assert.equal(await runMutationCheck(directory, { ...evaluationCase, mutation }), true);
+    assert.equal(await readFile(join(directory, "src-routing.ts"), "utf8"), "original");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("mutation checks record a surviving mutation and restore the candidate worktree", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "codex-router-mutation-test-"));
+  const evaluationCase = manifest.cases[0];
+  try {
+    await writeFile(join(directory, "src-routing.ts"), "original", "utf8");
+    const mutation = { ...evaluationCase.mutation!, file: "src-routing.ts", validation: { command: process.execPath, args: ["-e", "process.exit(0)"] } };
+    assert.equal(await runMutationCheck(directory, { ...evaluationCase, mutation }), false);
     assert.equal(await readFile(join(directory, "src-routing.ts"), "utf8"), "original");
   } finally {
     await rm(directory, { recursive: true, force: true });
