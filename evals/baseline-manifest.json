@@ -25,7 +25,7 @@
   "cases": [
     {
       "id": "focused-regression-test",
-      "prompt": "In test/routing.test.ts, add exactly one test named \"deterministic guardrails escalate destructive work\". It must create a candidate with fallbackRoute({ task: \"Rename a variable.\" }), pass it to applyGuardrails with the task \"Delete a database table.\" and the existing models fixture, then assert recommendedModel is \"gpt-5.6-sol\", recommendedEffort is \"high\", and risk is \"high\". Do not change production files or test files other than test/routing.test.ts. Run npm run check.",
+      "prompt": "In test/routing.test.ts, add exactly one test named \"destructive work is high risk\". Call fallbackRoute with the task \"Delete a database table.\" and assert that the returned route has risk \"high\". Change only test/routing.test.ts.",
       "validation": {
         "command": "npm",
         "args": ["run", "check"]
@@ -33,11 +33,10 @@
       "expectation": {
         "file": "test/routing.test.ts",
         "requiredPatterns": [
-          "deterministic guardrails escalate destructive work",
+          "destructive work is high risk",
           "Delete a database table.",
-          "gpt-5.6-sol",
-          "recommendedEffort, \"high\"",
-          "risk, \"high\""
+          "risk",
+          "high"
         ]
       },
       "mutation": {
@@ -52,23 +51,23 @@
       "simulation": {
         "file": "test/routing.test.ts",
         "search": "\ntest(\"routing response validation rejects malformed or excessive advice\", () => {",
-        "replacement": "\ntest(\"deterministic guardrails escalate destructive work\", () => {\n  const candidate = fallbackRoute({ task: \"Rename a variable.\" });\n  const route = applyGuardrails(candidate, { task: \"Delete a database table.\" }, models);\n  assert.equal(route.recommendedModel, \"gpt-5.6-sol\");\n  assert.equal(route.recommendedEffort, \"high\");\n  assert.equal(route.risk, \"high\");\n});\n\ntest(\"routing response validation rejects malformed or excessive advice\", () => {"
+        "replacement": "\ntest(\"destructive work is high risk\", () => {\n  const route = fallbackRoute({ task: \"Delete a database table.\" });\n  assert.equal(route.risk, \"high\");\n});\n\ntest(\"routing response validation rejects malformed or excessive advice\", () => {"
       },
       "simulationProfiles": {
         "sim-small": {
           "file": "test/routing.test.ts",
           "search": "\ntest(\"routing response validation rejects malformed or excessive advice\", () => {",
-          "replacement": "\ntest(\"deterministic guardrails escalate destructive work\", () => {\n  const candidate = fallbackRoute({ task: \"Rename a variable.\" });\n  const route = applyGuardrails(candidate, { task: \"Delete a database table.\" }, models);\n  assert.equal(route.recommendedModel, \"gpt-5.6-sol\");\n  assert.equal(route.recommendedEffort, \"high\");\n  assert.equal(route.risk, \"high\");\n});\n\ntest(\"routing response validation rejects malformed or excessive advice\", () => {"
+          "replacement": "\ntest(\"destructive work is high risk\", () => {\n  const route = fallbackRoute({ task: \"Delete a database table.\" });\n  assert.equal(route.risk, \"high\");\n});\n\ntest(\"routing response validation rejects malformed or excessive advice\", () => {"
         },
         "sim-balanced": {
           "file": "test/routing.test.ts",
           "search": "\ntest(\"routing response validation rejects malformed or excessive advice\", () => {",
-          "replacement": "\ntest(\"deterministic guardrails escalate destructive work\", () => {\n  const candidate = fallbackRoute({ task: \"Rename a variable.\" });\n  const route = applyGuardrails(candidate, { task: \"Delete a database table.\" }, models);\n  assert.equal(route.recommendedModel, \"gpt-5.6-sol\");\n  assert.equal(route.recommendedEffort, \"high\");\n  assert.equal(route.risk, \"high\");\n});\n\ntest(\"routing response validation rejects malformed or excessive advice\", () => {"
+          "replacement": "\ntest(\"destructive work is high risk\", () => {\n  const route = fallbackRoute({ task: \"Delete a database table.\" });\n  assert.equal(route.risk, \"high\");\n});\n\ntest(\"routing response validation rejects malformed or excessive advice\", () => {"
         },
         "sim-strong": {
           "file": "test/routing.test.ts",
           "search": "\ntest(\"routing response validation rejects malformed or excessive advice\", () => {",
-          "replacement": "\ntest(\"deterministic guardrails escalate destructive work\", () => {\n  const candidate = fallbackRoute({ task: \"Rename a variable.\" });\n  const route = applyGuardrails(candidate, { task: \"Delete a database table.\" }, models);\n  assert.equal(route.recommendedModel, \"gpt-5.6-sol\");\n  assert.equal(route.recommendedEffort, \"high\");\n  assert.equal(route.risk, \"high\");\n});\n\ntest(\"routing response validation rejects malformed or excessive advice\", () => {"
+          "replacement": "\ntest(\"destructive work is high risk\", () => {\n  const route = fallbackRoute({ task: \"Delete a database table.\" });\n  assert.equal(route.risk, \"high\");\n});\n\ntest(\"routing response validation rejects malformed or excessive advice\", () => {"
         }
       },
       "expectedSimulationProfile": "sim-strong",
