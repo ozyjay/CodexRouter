@@ -42,6 +42,14 @@ export interface ProxyCandidate {
   model: { publicModelId: string; localModelId?: string; revision?: string };
 }
 
+export type ProxyCandidateRejectionReason = "empty-response" | "invalid-json" | "invalid-contract";
+
+export class ProxyCandidateError extends Error {
+  public constructor(public readonly reason: ProxyCandidateRejectionReason) {
+    super(`ModelDeck proxy candidate rejected: ${reason}.`);
+  }
+}
+
 export class ModelDeckProvider {
   public constructor(private readonly config: ModelDeckConfig) {
     assertLoopbackUrl(config.baseUrl);
@@ -131,9 +139,9 @@ export class ModelDeckProvider {
     });
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const content = payload.choices?.[0]?.message?.content;
-    if (typeof content !== "string") throw new Error("ModelDeck returned no proxy-candidate content.");
-    const candidate = parseJsonObject(content);
-    if (!isValidProxyCandidate(candidate, input)) throw new Error("ModelDeck returned an invalid constrained proxy candidate.");
+    if (typeof content !== "string" || content.trim().length === 0) throw new ProxyCandidateError("empty-response");
+    const candidate = parseProxyCandidateJson(content);
+    if (!isValidProxyCandidate(candidate, input)) throw new ProxyCandidateError("invalid-contract");
     return {
       patches: candidate.patches,
       model: { publicModelId: model, localModelId: selectedModel.modeldeck?.model_id, revision: selectedModel.revision }
@@ -177,6 +185,15 @@ export function assertLoopbackUrl(value: string): void {
 function parseJsonObject(content: string): unknown {
   const fenced = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1] ?? content;
   return JSON.parse(fenced.trim());
+}
+
+function parseProxyCandidateJson(content: string): unknown {
+  const withoutThinking = content.replace(/^\s*<think>[\s\S]*?<\/think>\s*/i, "");
+  try {
+    return parseJsonObject(withoutThinking);
+  } catch {
+    throw new ProxyCandidateError("invalid-json");
+  }
 }
 
 function isValidSimulationSelectorRecommendation(value: unknown): value is Omit<SimulationSelectorRecommendation, "model"> {

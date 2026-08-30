@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { CodexAppServer, isChatGPTAuthentication } from "../src/appServer";
-import { ModelDeckProvider, SimulationSelectorRecommendation } from "../src/modelDeck";
+import { ModelDeckProvider, ProxyCandidateError, SimulationSelectorRecommendation } from "../src/modelDeck";
 import { EvaluationCase, EvaluationExecutionBackend, EvaluationManifest, EvaluationRunResult, EvaluationStrategy, ProxyCandidateConfig, ProxyRunMetadata, SimulationProfile, SimulationRunMetadata, SimulationScenario, buildPrompt, classifyCodexFailure, roleAgentFiles, simulationPatchForProfile, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
 
 type SimulationSelectorKind = "deterministic" | "modeldeck";
@@ -251,9 +251,11 @@ async function runProxyCandidate(directory: string, evaluationCase: EvaluationCa
     return execution;
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
+    const rejectionReason = error instanceof ProxyCandidateError ? error.reason : undefined;
     onMetadata({
       selectedProfile: simulation.metadata.selectedProfile,
       status: /not ready|request failed|abort/i.test(message) ? "unavailable" : "invalid",
+      rejectionReason,
       candidateDurationMs: Date.now() - startedAt
     });
     return { exitCode: 1, stderr: "" };

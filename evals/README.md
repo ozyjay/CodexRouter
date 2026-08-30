@@ -58,7 +58,7 @@ This command selects a simulation tier, then routes the candidate to `codex-rout
 
 Every proxy-enabled case must declare `proxy.allowedFiles` and `proxy.contextFiles` in the manifest. Context files must be a subset of allowed files; the proxy sees only the task and those file contents, up to the declared character budget. Its response must be a single strict JSON patch object, may modify only a contextual allowed file, and is limited to the declared patch count. Empty, malformed, out-of-scope, or inapplicable candidates fail the run. There is no deterministic-patch fallback.
 
-Reports are labelled `executionBackend: "slm-proxy"` and retain only selected tier, a safe candidate status, safe ModelDeck identities when a candidate was accepted, latency, and patch count. They never retain task text, context, proxy output, or patch content. These results measure the configured local proxies and their constrained workflow only; they are not Codex performance or allocation evidence.
+Reports are labelled `executionBackend: "slm-proxy"` and retain only selected tier, a safe candidate status and rejection category, safe ModelDeck identities when a candidate was accepted, latency, and patch count. They never retain task text, context, proxy output, or patch content. These results measure the configured local proxies and their constrained workflow only; they are not Codex performance or allocation evidence.
 
 ## Live comparison
 

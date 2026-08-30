@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ModelDeckProvider, assertLoopbackUrl } from "../src/modelDeck";
+import { ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl } from "../src/modelDeck";
 
 test("ModelDeck provider rejects non-loopback endpoints", () => {
   assert.throws(() => assertLoopbackUrl("https://example.com/v1"), /loopback/);
@@ -60,7 +60,7 @@ test("ModelDeck proxy candidates are restricted to declared contextual files and
     requestCount++;
     return new Response(JSON.stringify(requestCount === 1
       ? { data: [{ id: "codex-router-proxy-strong", ready: true, revision: "proxy-revision", modeldeck: { model_id: "local/proxy" } }] }
-      : { choices: [{ message: { content: "{\"patches\":[{\"file\":\"test/routing.test.ts\",\"search\":\"original\",\"replacement\":\"updated\"}]}" } }] }), { status: 200 });
+      : { choices: [{ message: { content: "<think>Choose the supplied test file.</think>\n{\"patches\":[{\"file\":\"test/routing.test.ts\",\"search\":\"original\",\"replacement\":\"updated\"}]}" } }] }), { status: 200 });
   }) as typeof fetch;
   try {
     const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
@@ -95,7 +95,7 @@ test("ModelDeck proxy candidates reject edits outside supplied context", async (
       allowedFiles: ["test/routing.test.ts", "src/routing.ts"],
       context: [{ file: "test/routing.test.ts", content: "original" }],
       maxPatches: 1
-    }), /invalid constrained proxy candidate/);
+    }), (error: unknown) => error instanceof ProxyCandidateError && error.reason === "invalid-contract");
   } finally {
     globalThis.fetch = originalFetch;
   }

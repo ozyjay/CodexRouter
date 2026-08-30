@@ -68,6 +68,7 @@ export interface ProxyCandidateConfig {
 export interface ProxyRunMetadata {
   selectedProfile: SimulationProfile;
   status: "applied" | "unavailable" | "invalid" | "inapplicable" | "context-error";
+  rejectionReason?: "empty-response" | "invalid-json" | "invalid-contract";
   model?: { publicModelId: string; localModelId?: string; revision?: string };
   candidateDurationMs: number;
   patchCount?: number;
