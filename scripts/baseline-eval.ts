@@ -44,10 +44,11 @@ async function main(): Promise<void> {
   if ([options.live, options.simulated, options.slmProxy].filter(Boolean).length > 1) throw new Error("Choose only one execution mode: --live, --simulated, or --slm-proxy.");
   if (options.selector === "modeldeck" && options.live) throw new Error("--selector modeldeck is available only with --simulated or --slm-proxy.");
   if (options.slmProxy) validateProxyCases(selectedCases);
+  const resolvedRef = await resolveEvaluationRef(options.ref);
 
   if (!options.live && !options.simulated && !options.slmProxy) {
     const strategies = ["single-model", "fixed-roles"] as const;
-    process.stdout.write(`${JSON.stringify({ mode: "dry-run", cases: selectedCases.map((evaluationCase) => evaluationCase.id), strategies, iterations: options.iterations, plannedRuns: selectedCases.length * strategies.length * options.iterations, simulationSelector: options.selector === "modeldeck" ? { kind: options.selector, model: options.modelDeckModel } : { kind: options.selector }, message: "No Codex turn, ModelDeck request, validation command, worktree, or result file was created. Re-run with --simulated for deterministic offline worktree evaluation, --slm-proxy for constrained local proxy candidates, or --live to consume Codex allowance." }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ mode: "dry-run", requestedRef: options.ref, ref: resolvedRef, cases: selectedCases.map((evaluationCase) => evaluationCase.id), strategies, iterations: options.iterations, plannedRuns: selectedCases.length * strategies.length * options.iterations, simulationSelector: options.selector === "modeldeck" ? { kind: options.selector, model: options.modelDeckModel } : { kind: options.selector }, message: "No Codex turn, ModelDeck request, validation command, worktree, or result file was created. Re-run with --simulated for deterministic offline worktree evaluation, --slm-proxy for constrained local proxy candidates, or --live to consume Codex allowance." }, null, 2)}\n`);
     return;
   }
 
@@ -75,14 +76,15 @@ async function main(): Promise<void> {
   for (const evaluationCase of selectedCases) {
     for (let iteration = 1; iteration <= options.iterations; iteration++) {
       for (const strategy of strategies) {
-        runs.push(await runEvaluation(manifest, evaluationCase, strategy, options.ref, iteration, executionBackend, options.selector, modelDeck, proxyProvider, options.proxyModels));
+        runs.push(await runEvaluation(manifest, evaluationCase, strategy, resolvedRef, iteration, executionBackend, options.selector, modelDeck, proxyProvider, options.proxyModels));
       }
     }
   }
   const report = {
-    version: 5,
+    version: 6,
     generatedAt: new Date().toISOString(),
-    ref: options.ref,
+    requestedRef: options.ref,
+    ref: resolvedRef,
     executionBackend,
     simulation: executionBackend === "simulated" ? {
       purpose: "Validate evaluation-harness isolation, quality gates, reporting, and failure accounting without a Codex turn.",
@@ -382,6 +384,12 @@ async function runCapture(command: string, args: string[]): Promise<string> {
     child.on("error", reject);
     child.on("exit", (code) => code === 0 ? resolvePromise(stdout) : reject(new Error(`${command} exited with status ${code ?? 1}.`)));
   });
+}
+
+export async function resolveEvaluationRef(ref: string): Promise<string> {
+  const resolved = (await runCapture("git", ["rev-parse", "--verify", "--end-of-options", `${ref}^{commit}`])).trim();
+  if (!/^[0-9a-f]{40}$/i.test(resolved)) throw new Error(`Git did not resolve ${ref} to a commit.`);
+  return resolved;
 }
 
 async function readManifest(path: string): Promise<EvaluationManifest> {

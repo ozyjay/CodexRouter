@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { CodexModel } from "../src/contracts";
 import { EvaluationManifest, buildPrompt, classifyCodexFailure, roleAgentFiles, simulationPatchForProfile, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
-import { allocationsForRun, linkInstalledDependencies, readProxyContext, runMutationCheck, runSimulation, strategiesForExecutionBackend } from "../scripts/baseline-eval";
+import { allocationsForRun, linkInstalledDependencies, readProxyContext, resolveEvaluationRef, runMutationCheck, runSimulation, strategiesForExecutionBackend } from "../scripts/baseline-eval";
 
 const manifest: EvaluationManifest = {
   version: 1,
@@ -159,6 +159,10 @@ test("simulated runs do not attribute allocations to Codex models", () => {
 test("local proxy execution runs one distinct proxy-candidate strategy per iteration", () => {
   assert.deepEqual(strategiesForExecutionBackend("slm-proxy"), ["proxy-candidate"]);
   assert.deepEqual(strategiesForExecutionBackend("simulated"), ["single-model", "fixed-roles"]);
+});
+
+test("evaluation references are resolved to an immutable commit before worktrees are created", async () => {
+  assert.match(await resolveEvaluationRef("HEAD"), /^[0-9a-f]{40}$/);
 });
 
 test("mutation checks restore the candidate worktree after evaluating it", async () => {
