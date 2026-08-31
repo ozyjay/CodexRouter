@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { CodexModel } from "../src/contracts";
 import { EvaluationManifest, buildPrompt, classifyCodexFailure, roleAgentFiles, simulationPatchForProfile, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
-import { allocationsForRun, linkInstalledDependencies, readProxyContext, runMutationCheck, runSimulation } from "../scripts/baseline-eval";
+import { allocationsForRun, linkInstalledDependencies, readProxyContext, runMutationCheck, runSimulation, strategiesForExecutionBackend } from "../scripts/baseline-eval";
 
 const manifest: EvaluationManifest = {
   version: 1,
@@ -40,6 +40,7 @@ test("fixed-role prompt and files remain sequential and role-scoped", () => {
   assert.match(files["router-baseline-explorer.toml"], /sandbox_mode = "read-only"/);
   assert.match(files["router-baseline-worker.toml"], /sandbox_mode = "workspace-write"/);
   assert.match(files["router-baseline-reviewer.toml"], /model_reasoning_effort = "high"/);
+  assert.throws(() => buildPrompt("proxy-candidate", manifest.cases[0]), /local proxy strategy/);
 });
 
 test("evaluation summary excludes prompts and aggregates verification", () => {
@@ -151,8 +152,13 @@ test("simulated execution fails safely when its patch cannot be applied", async 
 test("simulated runs do not attribute allocations to Codex models", () => {
   assert.deepEqual(allocationsForRun(manifest, "single-model", "simulated"), {});
   assert.deepEqual(allocationsForRun(manifest, "fixed-roles", "simulated"), {});
-  assert.deepEqual(allocationsForRun(manifest, "single-model", "slm-proxy"), {});
+  assert.deepEqual(allocationsForRun(manifest, "proxy-candidate", "slm-proxy"), {});
   assert.deepEqual(allocationsForRun(manifest, "single-model", "codex"), { singleModel: manifest.singleModel });
+});
+
+test("local proxy execution runs one distinct proxy-candidate strategy per iteration", () => {
+  assert.deepEqual(strategiesForExecutionBackend("slm-proxy"), ["proxy-candidate"]);
+  assert.deepEqual(strategiesForExecutionBackend("simulated"), ["single-model", "fixed-roles"]);
 });
 
 test("mutation checks restore the candidate worktree after evaluating it", async () => {

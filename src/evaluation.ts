@@ -1,6 +1,7 @@
 import { CodexModel, ReasoningEffort } from "./contracts";
 
-export type EvaluationStrategy = "single-model" | "fixed-roles";
+export const EVALUATION_STRATEGIES = ["single-model", "fixed-roles", "proxy-candidate"] as const;
+export type EvaluationStrategy = (typeof EVALUATION_STRATEGIES)[number];
 export type EvaluationExecutionBackend = "codex" | "simulated" | "slm-proxy";
 export type EvaluationFailureKind = "authentication" | "cli-configuration" | "model-allocation" | "worktree" | "simulation" | "proxy" | "startup-or-runtime";
 export const SIMULATION_PROFILES = ["sim-small", "sim-balanced", "sim-strong"] as const;
@@ -181,7 +182,8 @@ export function validateAllocations(manifest: EvaluationManifest, models: readon
 export function buildPrompt(strategy: EvaluationStrategy, evaluationCase: EvaluationCase): string {
   const task = evaluationCase.prompt.trim();
   if (strategy === "single-model") return `${task}\n\nRun the specified validation command before finishing. Keep the change focused and report only a concise completion summary.`;
-  return `Complete this task through the fixed baseline roles, sequentially and without parallel delegation:\n1. Ask router_baseline_explorer to map the relevant code path, risks, and validation approach.\n2. Ask router_baseline_worker to make the smallest defensible implementation using that evidence.\n3. Ask router_baseline_reviewer to inspect the resulting diff for correctness, security, regressions, and missing tests.\n4. Repair only concrete reviewer findings, then run the specified validation command.\n\nTask:\n${task}`;
+  if (strategy === "fixed-roles") return `Complete this task through the fixed baseline roles, sequentially and without parallel delegation:\n1. Ask router_baseline_explorer to map the relevant code path, risks, and validation approach.\n2. Ask router_baseline_worker to make the smallest defensible implementation using that evidence.\n3. Ask router_baseline_reviewer to inspect the resulting diff for correctness, security, regressions, and missing tests.\n4. Repair only concrete reviewer findings, then run the specified validation command.\n\nTask:\n${task}`;
+  throw new Error("proxy-candidate is a local proxy strategy and cannot build a Codex prompt.");
 }
 
 export function roleAgentFiles(roles: FixedRoleAllocations): Record<string, string> {
@@ -202,10 +204,11 @@ export function simulationPatchForProfile(evaluationCase: EvaluationCase, reques
 export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): EvaluationSummary {
   const byStrategy: EvaluationSummary["byStrategy"] = {
     "single-model": { total: 0, validationPassed: 0, expectationPassed: 0, mutationEvaluated: 0, mutationKilled: 0, verified: 0, averageDurationMs: 0, averageVerifiedDurationMs: null, costPerVerifiedRunMs: null },
-    "fixed-roles": { total: 0, validationPassed: 0, expectationPassed: 0, mutationEvaluated: 0, mutationKilled: 0, verified: 0, averageDurationMs: 0, averageVerifiedDurationMs: null, costPerVerifiedRunMs: null }
+    "fixed-roles": { total: 0, validationPassed: 0, expectationPassed: 0, mutationEvaluated: 0, mutationKilled: 0, verified: 0, averageDurationMs: 0, averageVerifiedDurationMs: null, costPerVerifiedRunMs: null },
+    "proxy-candidate": { total: 0, validationPassed: 0, expectationPassed: 0, mutationEvaluated: 0, mutationKilled: 0, verified: 0, averageDurationMs: 0, averageVerifiedDurationMs: null, costPerVerifiedRunMs: null }
   };
-  const durationTotals: Record<EvaluationStrategy, number> = { "single-model": 0, "fixed-roles": 0 };
-  const verifiedDurationTotals: Record<EvaluationStrategy, number> = { "single-model": 0, "fixed-roles": 0 };
+  const durationTotals: Record<EvaluationStrategy, number> = { "single-model": 0, "fixed-roles": 0, "proxy-candidate": 0 };
+  const verifiedDurationTotals: Record<EvaluationStrategy, number> = { "single-model": 0, "fixed-roles": 0, "proxy-candidate": 0 };
   let durationTotal = 0;
   let completedRuns = 0;
   let validationPassedRuns = 0;
@@ -253,7 +256,7 @@ export function summariseEvaluationRuns(runs: readonly EvaluationRunResult[]): E
   for (const bucket of Object.values(byStrategy)) {
     bucket.averageDurationMs = bucket.total === 0 ? 0 : Math.round(bucket.averageDurationMs / bucket.total);
   }
-  for (const strategy of ["single-model", "fixed-roles"] as const) {
+  for (const strategy of EVALUATION_STRATEGIES) {
     const bucket = byStrategy[strategy];
     bucket.averageVerifiedDurationMs = bucket.verified === 0 ? null : Math.round(verifiedDurationTotals[strategy] / bucket.verified);
     bucket.costPerVerifiedRunMs = bucket.verified === 0 ? null : Math.round(durationTotals[strategy] / bucket.verified);

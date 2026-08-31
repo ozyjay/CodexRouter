@@ -54,7 +54,7 @@ npm run eval:baseline -- \
   --case focused-regression-test
 ```
 
-This command selects a simulation tier, then routes the candidate to `codex-router-proxy-small`, `codex-router-proxy-balanced`, or `codex-router-proxy-strong`. Override a route only when necessary with `--proxy-model-small`, `--proxy-model-balanced`, or `--proxy-model-strong`; `--proxy-timeout-ms` defaults to three minutes. `--proxy-max-tokens` defaults to 2,048 so reasoning-capable local models have room to produce a final patch after deliberation. It does not start Codex or consume ChatGPT allowance.
+This command selects a simulation tier, then routes one `proxy-candidate` per case iteration to `codex-router-proxy-small`, `codex-router-proxy-balanced`, or `codex-router-proxy-strong`. It does not run the fixed-role baseline because local proxy candidates do not use those roles. Override a route only when necessary with `--proxy-model-small`, `--proxy-model-balanced`, or `--proxy-model-strong`; `--proxy-timeout-ms` defaults to three minutes. `--proxy-max-tokens` defaults to 2,048 so reasoning-capable local models have room to produce a final patch after deliberation. It does not start Codex or consume ChatGPT allowance.
 
 Every proxy-enabled case must declare `proxy.allowedFiles` and `proxy.contextFiles` in the manifest. Context files must be a subset of allowed files; the proxy sees only the task and those file contents, up to the declared character budget. Its response must be a single strict JSON patch object, may modify only a contextual allowed file, and is limited to the declared patch count. Empty, malformed, out-of-scope, or inapplicable candidates fail the run. There is no deterministic-patch fallback.
 

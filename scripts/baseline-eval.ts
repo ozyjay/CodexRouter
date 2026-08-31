@@ -46,7 +46,8 @@ async function main(): Promise<void> {
   if (options.slmProxy) validateProxyCases(selectedCases);
 
   if (!options.live && !options.simulated && !options.slmProxy) {
-    process.stdout.write(`${JSON.stringify({ mode: "dry-run", cases: selectedCases.map((evaluationCase) => evaluationCase.id), strategies: ["single-model", "fixed-roles"], iterations: options.iterations, plannedRuns: selectedCases.length * 2 * options.iterations, simulationSelector: options.selector === "modeldeck" ? { kind: options.selector, model: options.modelDeckModel } : { kind: options.selector }, message: "No Codex turn, ModelDeck request, validation command, worktree, or result file was created. Re-run with --simulated for deterministic offline worktree evaluation, --slm-proxy for constrained local proxy candidates, or --live to consume Codex allowance." }, null, 2)}\n`);
+    const strategies = ["single-model", "fixed-roles"] as const;
+    process.stdout.write(`${JSON.stringify({ mode: "dry-run", cases: selectedCases.map((evaluationCase) => evaluationCase.id), strategies, iterations: options.iterations, plannedRuns: selectedCases.length * strategies.length * options.iterations, simulationSelector: options.selector === "modeldeck" ? { kind: options.selector, model: options.modelDeckModel } : { kind: options.selector }, message: "No Codex turn, ModelDeck request, validation command, worktree, or result file was created. Re-run with --simulated for deterministic offline worktree evaluation, --slm-proxy for constrained local proxy candidates, or --live to consume Codex allowance." }, null, 2)}\n`);
     return;
   }
 
@@ -69,16 +70,17 @@ async function main(): Promise<void> {
   const proxyProvider = executionBackend === "slm-proxy"
     ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, timeoutMs: options.proxyTimeoutMs, proxyMaxTokens: options.proxyMaxTokens })
     : undefined;
+  const strategies = strategiesForExecutionBackend(executionBackend);
   const runs: EvaluationRunResult[] = [];
   for (const evaluationCase of selectedCases) {
     for (let iteration = 1; iteration <= options.iterations; iteration++) {
-      for (const strategy of ["single-model", "fixed-roles"] as const) {
+      for (const strategy of strategies) {
         runs.push(await runEvaluation(manifest, evaluationCase, strategy, options.ref, iteration, executionBackend, options.selector, modelDeck, proxyProvider, options.proxyModels));
       }
     }
   }
   const report = {
-    version: 4,
+    version: 5,
     generatedAt: new Date().toISOString(),
     ref: options.ref,
     executionBackend,
@@ -89,7 +91,7 @@ async function main(): Promise<void> {
       selector: options.selector === "modeldeck" ? { kind: "modeldeck", publicModelId: options.modelDeckModel } : { kind: "deterministic" }
     } : undefined,
     proxy: executionBackend === "slm-proxy" ? {
-      purpose: "Exercise constrained local proxy-generated patch candidates against the ordinary evaluation gates without a Codex turn.",
+      purpose: "Exercise one constrained local proxy-generated patch candidate per case iteration against the ordinary evaluation gates without a Codex turn.",
       allocationAttribution: "none",
       performanceAttribution: "local-proxy-only",
       selector: options.selector === "modeldeck" ? { kind: "modeldeck", publicModelId: options.modelDeckModel } : { kind: "deterministic" },
@@ -114,7 +116,7 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
       await fs.mkdir(agentsDirectory, { recursive: true });
       await Promise.all(Object.entries(roleAgentFiles(manifest.fixedRoles)).map(([name, content]) => fs.writeFile(join(agentsDirectory, name), content, { encoding: "utf8", mode: 0o600 })));
     }
-    const allocation = strategy === "single-model" ? manifest.singleModel : manifest.fixedRoles.parent;
+    const allocation = strategy === "fixed-roles" ? manifest.fixedRoles.parent : manifest.singleModel;
     const startedAt = Date.now();
     const simulation = executionBackend === "simulated" || executionBackend === "slm-proxy" ? await resolveSimulation(evaluationCase, selectorKind, selector) : undefined;
     let proxy: ProxyRunMetadata | undefined;
@@ -216,6 +218,10 @@ export function allocationsForRun(manifest: EvaluationManifest, strategy: Evalua
     worker: manifest.fixedRoles.worker,
     reviewer: manifest.fixedRoles.reviewer
   };
+}
+
+export function strategiesForExecutionBackend(executionBackend: EvaluationExecutionBackend): readonly EvaluationStrategy[] {
+  return executionBackend === "slm-proxy" ? ["proxy-candidate"] : ["single-model", "fixed-roles"];
 }
 
 function validateProxyCases(cases: readonly EvaluationCase[]): void {
