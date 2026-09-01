@@ -74,13 +74,13 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p .",
-    "watch": "tsc -watch -p .",
-    "test": "tsx --test test/**/*.test.ts",
-    "check:baseline": "tsc --noEmit --target ES2022 --module commonjs --strict --esModuleInterop --skipLibCheck scripts/baseline-eval.ts",
-    "check": "npm run compile && npm run check:baseline && npm run test",
-    "eval:baseline": "tsx scripts/baseline-eval.ts",
-    "eval:baseline:sim": "tsx scripts/baseline-eval.ts --simulated"
+    "compile": "pwsh -NoProfile -File scripts/invoke.ps1 compile",
+    "watch": "pwsh -NoProfile -File scripts/invoke.ps1 watch",
+    "test": "pwsh -NoProfile -File scripts/invoke.ps1 test",
+    "check:baseline": "pwsh -NoProfile -File scripts/invoke.ps1 check-baseline",
+    "check": "pwsh -NoProfile -File scripts/invoke.ps1 check",
+    "eval:baseline": "pwsh -NoProfile -File scripts/invoke.ps1 eval-baseline",
+    "eval:baseline:sim": "pwsh -NoProfile -File scripts/invoke.ps1 eval-baseline-sim"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",

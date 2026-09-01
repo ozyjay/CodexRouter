@@ -113,13 +113,13 @@ Codex Local Meter remains the preferred source for observing ChatGPT Codex usage
 
 ## Development and verification
 
-```bash
+```powershell
 npm run compile
 npm run test
 npm run check
 ```
 
-The test suite uses fake App Server and ModelDeck transports; it makes no Codex model turns and consumes no ChatGPT allowance.
+The package scripts invoke `pwsh -NoProfile` through `scripts/invoke.ps1`. The test suite uses fake App Server and ModelDeck transports; it makes no Codex model turns and consumes no ChatGPT allowance.
 
 ### Fixed-role baseline evaluation
 

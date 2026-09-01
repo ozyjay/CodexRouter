@@ -10,7 +10,7 @@ Update `baseline-manifest.json` with representative cases and the model/effort c
 
 ## Dry run
 
-```bash
+```powershell
 npm run eval:baseline
 ```
 
@@ -18,7 +18,7 @@ This validates the manifest and prints the planned cases. It does not start Code
 
 ## Deterministic simulation
 
-```bash
+```powershell
 npm run eval:baseline:sim -- --iterations 3
 ```
 
@@ -28,9 +28,9 @@ Simulation uses the case's declared local patch instead of calling Codex, then r
 
 To test whether a local selector chooses the declared deterministic simulation tiers, run:
 
-```bash
-npm run eval:baseline:sim -- \
-  --selector modeldeck \
+```powershell
+npm run eval:baseline:sim -- `
+  --selector modeldeck `
   --modeldeck-model codex-router-simulation-selector
 ```
 
@@ -46,11 +46,11 @@ A declared simulation scenario may contain one patch or an ordered set of patche
 
 To execute a local proxy candidate, rather than a declared deterministic patch, run a case with explicit proxy constraints:
 
-```bash
-npm run eval:baseline -- \
-  --slm-proxy \
-  --selector modeldeck \
-  --modeldeck-model codex-router-simulation-selector \
+```powershell
+npm run eval:baseline -- `
+  --slm-proxy `
+  --selector modeldeck `
+  --modeldeck-model codex-router-simulation-selector `
   --case focused-regression-test
 ```
 
@@ -62,7 +62,7 @@ Reports are labelled `executionBackend: "slm-proxy"` and retain only selected ti
 
 ## Live comparison
 
-```bash
+```powershell
 npm run eval:baseline -- --live
 ```
 
