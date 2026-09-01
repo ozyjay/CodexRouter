@@ -147,7 +147,7 @@
         "allowedFiles": ["test/evaluation.test.ts", "evals/README.md"],
         "contextFiles": ["test/evaluation.test.ts", "evals/README.md"],
         "maxPatches": 2,
-        "maxContextChars": 24000
+        "maxContextChars": 28000
       }
     }
   ]

@@ -60,6 +60,8 @@ This command selects a simulation tier, then routes one `proxy-candidate` per ca
 
 Every proxy-enabled case must declare `proxy.allowedFiles` and `proxy.contextFiles` in the manifest. Context files must be a subset of allowed files; the proxy sees only the task and those file contents, up to the declared character budget. Its response must be a single strict JSON patch object, may modify only a contextual allowed file, and is limited to the declared patch count. Empty, malformed, out-of-scope, or inapplicable candidates fail the run. There is no deterministic-patch fallback.
 
+Set each context budget high enough for every complete declared context file at the pinned evaluation revision. A `context-error` means the runner deliberately refused to truncate a file or send a partial context to the proxy.
+
 Reports are labelled `executionBackend: "slm-proxy"` and retain only selected tier, a safe candidate status and rejection category, safe ModelDeck identities when a candidate was accepted, latency, and patch count. They never retain task text, context, proxy output, or patch content. These results measure the configured local proxies and their constrained workflow only; they are not Codex performance or allocation evidence.
 
 At cohort start, the runner snapshots the selector and all three proxy capability routes by public model ID, local model ID, and revision. It checks that snapshot before and after every candidate; a route change fails the cohort rather than mixing worker configurations. Start a new cohort whenever any of those identities, worker settings, or capability assignments change.
