@@ -56,7 +56,7 @@ export interface SimulationRunMetadata {
   selector: "deterministic" | "modeldeck";
   fallback: boolean;
   selectorDurationMs?: number;
-  selectorModel?: { publicModelId: string; localModelId?: string; revision?: string };
+  selectorModel?: { publicModelId: string; localModelId?: string; revision?: string; configurationFingerprint?: string };
 }
 
 export interface ProxyCandidateConfig {
@@ -70,7 +70,7 @@ export interface ProxyRunMetadata {
   selectedProfile: SimulationProfile;
   status: "applied" | "unavailable" | "invalid" | "inapplicable" | "context-error";
   rejectionReason?: "empty-response" | "invalid-json" | "invalid-contract";
-  model?: { publicModelId: string; localModelId?: string; revision?: string };
+  model?: { publicModelId: string; localModelId?: string; revision?: string; configurationFingerprint?: string };
   maxTokens?: number;
   readinessWaitMs?: number;
   readinessChecks?: number;

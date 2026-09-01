@@ -170,13 +170,13 @@ test("local proxy execution runs one distinct proxy-candidate strategy per itera
 test("proxy cohorts require unchanged capability route identities", async () => {
   const routes = capabilityRouteIdsFor({ selector: "modeldeck", modelDeckModel: "selector", proxyModels: { "sim-small": "small", "sim-balanced": "balanced", "sim-strong": "strong" } });
   const snapshot = {
-    selector: { publicModelId: "selector", localModelId: "local/selector", revision: "1" },
-    small: { publicModelId: "small", localModelId: "local/small", revision: "1" },
-    balanced: { publicModelId: "balanced", localModelId: "local/balanced", revision: "1" },
-    strong: { publicModelId: "strong", localModelId: "local/strong", revision: "1" }
+    selector: { publicModelId: "selector", localModelId: "local/selector", revision: "1", configurationFingerprint: "selector-config" },
+    small: { publicModelId: "small", localModelId: "local/small", revision: "1", configurationFingerprint: "small-config" },
+    balanced: { publicModelId: "balanced", localModelId: "local/balanced", revision: "1", configurationFingerprint: "balanced-config" },
+    strong: { publicModelId: "strong", localModelId: "local/strong", revision: "1", configurationFingerprint: "strong-config" }
   };
   await assert.doesNotReject(assertCapabilitySnapshot({ snapshotRoutes: async () => snapshot }, routes, snapshot));
-  await assert.rejects(assertCapabilitySnapshot({ snapshotRoutes: async () => ({ ...snapshot, strong: { ...snapshot.strong, revision: "2" } }) }, routes, snapshot), /routes changed/);
+  await assert.rejects(assertCapabilitySnapshot({ snapshotRoutes: async () => ({ ...snapshot, strong: { ...snapshot.strong, configurationFingerprint: "replacement-config" } }) }, routes, snapshot), /routes changed/);
 });
 
 test("proxy readiness preflight targets declared expected tiers and otherwise all tiers", () => {

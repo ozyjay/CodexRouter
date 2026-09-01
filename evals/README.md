@@ -64,7 +64,7 @@ Set each context budget high enough for every complete declared context file at 
 
 Reports are labelled `executionBackend: "slm-proxy"` and retain only selected tier, a safe candidate status and rejection category, safe ModelDeck identities when a candidate was accepted, latency, and patch count. They never retain task text, context, proxy output, or patch content. These results measure the configured local proxies and their constrained workflow only; they are not Codex performance or allocation evidence.
 
-At cohort start, the runner snapshots the selector and all three proxy capability routes by public model ID, local model ID, and revision. It checks that snapshot before and after every candidate; a route change fails the cohort rather than mixing worker configurations. Start a new cohort whenever any of those identities, worker settings, or capability assignments change.
+At cohort start, the runner snapshots the selector and all three proxy capability routes by public model ID, local model ID, revision, and ModelDeck configuration fingerprint. It checks that snapshot before and after every candidate; a route or worker-setting change fails the cohort rather than mixing configurations. Start a new cohort whenever any of those identities, worker settings, or capability assignments change.
 
 ## Live comparison
 

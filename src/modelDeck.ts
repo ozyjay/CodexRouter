@@ -13,13 +13,14 @@ interface ModelDeckModel {
   id: string;
   ready?: boolean;
   revision?: string;
-  modeldeck?: { model_id?: string };
+  modeldeck?: { model_id?: string; configuration_fingerprint?: string };
 }
 
 export interface ModelDeckRouteIdentity {
   publicModelId: string;
   localModelId?: string;
   revision?: string;
+  configurationFingerprint?: string;
 }
 
 export interface ModelDeckReadinessPreflight {
@@ -40,7 +41,7 @@ export interface SimulationSelectorRecommendation {
   simulationProfile: SimulationProfile;
   confidence: number;
   rationale: string;
-  model: { publicModelId: string; localModelId?: string; revision?: string };
+  model: ModelDeckRouteIdentity;
 }
 
 export interface ProxyCandidateInput {
@@ -52,7 +53,7 @@ export interface ProxyCandidateInput {
 
 export interface ProxyCandidate {
   patches: Array<{ file: string; search: string; replacement: string }>;
-  model: { publicModelId: string; localModelId?: string; revision?: string };
+  model: ModelDeckRouteIdentity;
 }
 
 export type ProxyCandidateRejectionReason = "empty-response" | "invalid-json" | "invalid-contract";
@@ -80,7 +81,7 @@ export class ModelDeckProvider {
     for (const modelId of [...new Set(modelIds)]) {
       const model = payload.data.find((candidate) => candidate.id === modelId);
       if (!model) throw new Error(`ModelDeck did not report configured route ${modelId}.`);
-      snapshot[modelId] = { publicModelId: modelId, localModelId: model.modeldeck?.model_id, revision: model.revision };
+      snapshot[modelId] = modelDeckRouteIdentity(modelId, model);
     }
     return snapshot;
   }
@@ -157,7 +158,7 @@ export class ModelDeckProvider {
     if (!isValidSimulationSelectorRecommendation(candidate)) throw new Error("ModelDeck returned an invalid simulation-selector response.");
     return {
       ...candidate,
-      model: { publicModelId: model, localModelId: selectedModel.modeldeck?.model_id, revision: selectedModel.revision }
+      model: modelDeckRouteIdentity(model, selectedModel)
     };
   }
 
@@ -187,7 +188,7 @@ export class ModelDeckProvider {
     if (!isValidProxyCandidate(candidate, input)) throw new ProxyCandidateError("invalid-contract");
     return {
       patches: candidate.patches,
-      model: { publicModelId: model, localModelId: selectedModel.modeldeck?.model_id, revision: selectedModel.revision }
+      model: modelDeckRouteIdentity(model, selectedModel)
     };
   }
 
@@ -213,6 +214,14 @@ export class ModelDeckProvider {
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
+}
+
+function modelDeckRouteIdentity(publicModelId: string, model: ModelDeckModel): ModelDeckRouteIdentity {
+  const identity: ModelDeckRouteIdentity = { publicModelId };
+  if (model.modeldeck?.model_id) identity.localModelId = model.modeldeck.model_id;
+  if (model.revision) identity.revision = model.revision;
+  if (model.modeldeck?.configuration_fingerprint) identity.configurationFingerprint = model.modeldeck.configuration_fingerprint;
+  return identity;
 }
 
 export function assertLoopbackUrl(value: string): void {

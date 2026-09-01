@@ -91,7 +91,7 @@ async function main(): Promise<void> {
     }
   }
   const report = {
-    version: 9,
+    version: 10,
     generatedAt: new Date().toISOString(),
     requestedRef: options.ref,
     ref: resolvedRef,

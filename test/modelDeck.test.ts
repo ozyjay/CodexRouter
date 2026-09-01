@@ -9,14 +9,14 @@ test("ModelDeck provider rejects non-loopback endpoints", () => {
 test("ModelDeck route snapshots retain only configured safe identities", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => new Response(JSON.stringify({ data: [
-    { id: "selector", ready: true, revision: "selector-revision", modeldeck: { model_id: "local/selector" } },
-    { id: "proxy", ready: false, revision: "proxy-revision", modeldeck: { model_id: "local/proxy" } }
+    { id: "selector", ready: true, revision: "selector-revision", modeldeck: { model_id: "local/selector", configuration_fingerprint: "selector-config" } },
+    { id: "proxy", ready: false, revision: "proxy-revision", modeldeck: { model_id: "local/proxy", configuration_fingerprint: "proxy-config" } }
   ] }), { status: 200 })) as typeof fetch;
   try {
     const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
     assert.deepEqual(await provider.snapshotRoutes(["selector", "proxy"]), {
-      selector: { publicModelId: "selector", localModelId: "local/selector", revision: "selector-revision" },
-      proxy: { publicModelId: "proxy", localModelId: "local/proxy", revision: "proxy-revision" }
+      selector: { publicModelId: "selector", localModelId: "local/selector", revision: "selector-revision", configurationFingerprint: "selector-config" },
+      proxy: { publicModelId: "proxy", localModelId: "local/proxy", revision: "proxy-revision", configurationFingerprint: "proxy-config" }
     });
   } finally {
     globalThis.fetch = originalFetch;
