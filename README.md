@@ -12,6 +12,7 @@ It does not use the OpenAI Platform API, request an API key, or read `~/.codex/a
 - Runtime model and reasoning-effort discovery through Codex App Server `model/list`.
 - Safe authentication validation through App Server `account/read` without requesting tokens.
 - Local ModelDeck discovery (`GET /v1/models`) and structured classification (`POST /v1/chat/completions`).
+- Explicit selected-code ModelDeck proxy candidates with strict single-patch validation, preview, and optional Codex hand-off.
 - Deterministic routing by default, strict local-classifier validation, and safety guardrails.
 - Separate routing metadata and user-approved Codex execution context.
 - Explicit **Use recommendation** or **Override** selection before any Codex turn begins.
@@ -38,6 +39,8 @@ deterministic policy (default) <---- safety baseline ---- optional ModelDeck pol
 ```
 
 The router normally receives only the task. Active-file language and relative-name metadata are opt-in. The selected-code command supplies only selection metadata to routing; the source excerpt is withheld from the classifier and included in the Codex execution prompt after the user accepts or overrides the recommendation. No repository-wide content is sent by default.
+
+The separate **Generate ModelDeck Proxy Candidate for Selection** command is more explicit because a coding proxy needs source context. It shows the filename, selected-character count, and configured ModelDeck model before sending the task and selection to the loopback endpoint. It accepts exactly one patch for that file, requires the search text to occur exactly once in the selection, and opens an advisory preview without changing the workspace. The user may then route that candidate through Codex; Codex reviews it independently through the normal recommendation, approval, sandbox, and verification flow.
 
 Router analytics never store task text, source code, selected excerpts, filenames, workspace names, generated answers, App Server protocol messages, or credentials.
 
@@ -82,6 +85,8 @@ While a turn is running, select the Codex Router status item or run **Codex Rout
 
 Use **Codex Router: Send Selection to Codex Router** from an editor selection to send only selection metadata to routing and make the excerpt available to the executing Codex turn after approval.
 
+To use a ModelDeck coding route as an adviser, select up to 12,000 characters and run **Codex Router: Generate ModelDeck Proxy Candidate for Selection**. Confirm the limited context disclosure, review the candidate preview, then optionally choose **Route candidate through Codex**. Dismissing the action leaves the workspace unchanged and does not start a Codex turn.
+
 ### Debugging
 
 The repository includes a **Run Codex Router** launch configuration. Open `src/extension.ts`, set a breakpoint, and press `F5`. VS Code first runs `npm run compile`, then opens an Extension Development Host with this extension loaded. Trigger **Codex Router: New Routed Task** in that development window to stop at the breakpoint. Use the **npm: watch** task while actively editing to rebuild on save.
@@ -95,10 +100,13 @@ If something does not start, run **Codex Router: Show Diagnostics** from the Com
 | `codexRouter.routing.provider` | `deterministic` | Selects the transparent baseline or the opt-in `modeldeck-experimental` policy. |
 | `codexRouter.modelDeck.baseUrl` | `http://127.0.0.1:8600/v1` | Local ModelDeck OpenAI-compatible endpoint. |
 | `codexRouter.modelDeck.routerModel` | empty | Optional local routing model ID. Empty chooses the first ready model advertised by ModelDeck. |
+| `codexRouter.modelDeck.proxyModel` | `codex-router-proxy-balanced` | ModelDeck coding route used only after the selected-code proxy command and disclosure confirmation. |
+| `codexRouter.modelDeck.proxyTimeoutMs` | `120000` | Timeout for an explicitly requested local proxy candidate. |
+| `codexRouter.modelDeck.proxyMaxTokens` | `2048` | Maximum local proxy-candidate output budget. |
 | `codexRouter.requestTimeoutMs` | `5000` | Experimental local-classifier timeout. |
 | `codexRouter.analytics.enabled` | `false` | Enables local outcome records. |
 
-ModelDeck is not contacted under the default policy. When explicitly enabled, an unavailable, timed-out, malformed, non-loopback, or unsupported classifier result falls back visibly to the deterministic policy without a cloud-routing request.
+ModelDeck classification is not contacted under the default policy. The proxy command contacts ModelDeck only after its separate disclosure confirmation, regardless of the routing-provider setting. An unavailable, timed-out, malformed, non-loopback, out-of-scope, or inapplicable proxy result fails closed; it is never applied and never replaced with a generated fallback. An experimental classifier failure instead falls back visibly to the deterministic policy without a cloud-routing request.
 
 ## Routing policy
 
@@ -118,7 +126,7 @@ A user can override every recommendation using only live, visible model/effort c
 
 When `codexRouter.analytics.enabled` is enabled, versioned `outcomes.ndjson` records are stored beneath VS Code’s extension global storage. Turn state is separate from user-reported task completion and build/test evidence: a completed Codex turn is not automatically a successful software task.
 
-Run **Codex Router: Export Outcome Report** to choose a Markdown destination. Reports show sample size, missing outcomes, overrides, verified completion, repair turns, elapsed time per verified completion, and user-reported under- or over-routing. Groups with fewer than 20 observed outcomes or five verified completions are marked too small for a policy change. Run **Codex Router: Clear Local Outcome Records** to delete the local store after confirmation.
+Run **Codex Router: Export Outcome Report** to choose a Markdown destination. Reports show sample size, missing outcomes, overrides, verified completion, repair turns, elapsed time per verified completion, user-reported under- or over-routing, and whether a named local proxy advisory was included. Records store only that proxy public model ID—not its task, file, search text, replacement, source context, or output. Groups with fewer than 20 observed outcomes or five verified completions are marked too small for a policy change. Run **Codex Router: Clear Local Outcome Records** to delete the local store after confirmation.
 
 Codex Local Meter remains the preferred source for observing ChatGPT Codex usage. Codex Router does not read or depend on another extension’s private state.
 
@@ -153,11 +161,12 @@ This starts a real Codex turn and consumes the user’s ChatGPT Codex allowance:
 3. Run **Codex Router: New Routed Task** with a harmless task such as “Add a comment to the README and report the change”.
 4. Confirm deterministic routing is shown, select a configuration, and verify streamed output, ordinary Codex approvals, and cancellation with a harmless long-running task if appropriate.
 5. Optionally enable `modeldeck-experimental` and confirm its identity or visible deterministic fallback.
-6. Confirm the status item reports the selected model and effort. If analytics was enabled, inspect only the metadata record and exported report.
+6. Optionally select a harmless unique excerpt, run **Generate ModelDeck Proxy Candidate for Selection**, confirm the disclosed context, and verify that dismissing the preview action makes no edit and starts no Codex turn. Routing it onwards consumes ChatGPT Codex allowance.
+7. Confirm the status item reports the selected model and effort. If analytics was enabled, inspect only the metadata record and exported report.
 
 ## Current limitations and next steps
 
-- The installed `codex-cli 0.150.1` schema was inspected for `account/read`, `model/list`, `turn/start`, `turn/interrupt`, terminal turn states, and approval requests. A real turn still requires the explicit manual smoke test above because it consumes ChatGPT allowance.
+- The installed `codex-cli 0.150.1` schema was inspected for `account/read`, `model/list`, `turn/start`, `turn/interrupt`, terminal turn states, and approval requests. Real Codex execution and the configured ModelDeck proxy route still require the explicit manual smoke test above because they depend on local runtime state; a routed Codex turn consumes ChatGPT allowance.
 - The primary sidebar panel is the next UI milestone. Commands and `@router` currently use the shared routing-session controller.
 - Build/test outcomes and repair-turn counts are deliberately user-reported rather than inferred from model output.
 - The `@router` entry point depends on the host enabling VS Code’s public Chat Participant API. The command entry point is always available.

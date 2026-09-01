@@ -21,6 +21,7 @@ The evidence-first command milestone now supplies the prerequisite product basel
 - ordinal strength is presented instead of percentage confidence;
 - versioned local outcomes distinguish App Server turn state from user-reported task and validation results;
 - basic Markdown export flags small or incomplete observational samples.
+- an explicitly confirmed selected-code ModelDeck proxy can produce a strict advisory patch preview for optional independent Codex review.
 
 The sidebar panel, matched live evaluation, phase-aware routing, subagent allocation, and automatic policy learning remain future work. Nothing in the current milestone is evidence that ModelDeck, a model tier, or a multi-agent strategy is superior.
 
@@ -37,6 +38,8 @@ Execution backend: Codex App Server using existing ChatGPT authentication
 ```
 
 This is not a proposal to make Ollama, LM Studio, or ModelDeck execute Codex turns. Codex App Server remains the sole execution backend and its live model catalogue remains authoritative for selectable Codex models and reasoning efforts.
+
+The implemented proxy command does not change that rule: ModelDeck produces an untrusted advisory candidate only. It cannot edit the workspace, start tools, or bypass Codex approval. The candidate reaches Codex only after the user reviews the preview and explicitly chooses the hand-off.
 
 Each provider integration must:
 
@@ -98,6 +101,8 @@ Report raw elapsed time only as a diagnostic. Compare strategy efficiency throug
 Use a deterministic, explicitly labelled simulation backend to test worktree isolation, quality gates, reporting, and failure accounting without consuming Codex allowance. Simulation must never be presented as a result for Luna, Terra, Sol, or any live Codex allocation; use live App Server runs only to support those claims.
 
 Constrained local proxy candidates may complement deterministic simulation after the latter is established. They must receive only manifest-declared task context, modify only manifest-declared contextual files through a strict patch contract, and fail closed on malformed or inapplicable output. Run exactly one distinct proxy-candidate strategy per case iteration; fixed Codex roles are not part of that local-proxy execution. Snapshot selector and proxy route identities, including ModelDeck configuration fingerprints, at cohort start and fail if they drift during the cohort. Report them as local-proxy workflow evidence, separately from both deterministic-harness and live Codex results.
+
+The product-facing selected-code workflow is deliberately narrower than the evaluation runner: one user-selected contextual file, one uniquely applicable patch, no direct edit, an advisory preview, and an optional Codex hand-off. Privacy-safe outcome records may retain the proxy public model ID to separate assisted and unassisted cohorts, but never the task, filename, source, patch, or generated response.
 
 Start with narrow tasks whose requested change, target test, and expected assertion are explicit. For each task, evaluate privacy-safe booleans that the temporary-worktree diff contains the required evidence, normal validation succeeds, and controlled fault injection is detected where the task adds a regression test. Run matched repeated trials for each strategy; a passing check without the requested evidence or a killed mutation is not verified completion.
 

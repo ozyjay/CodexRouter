@@ -93,9 +93,12 @@ export class RoutingSessionController {
     if (metadata?.relativeFileName) routingItems.push(`file metadata: ${metadata.relativeFileName}`);
     if (metadata?.selectionPresent) routingItems.push(`selection metadata: ${metadata.selectedCharacters ?? 0} characters; source withheld`);
     const excerpt = this.input.execution.selectedExcerpt;
+    const proxy = this.input.execution.localProxyCandidate;
+    const executionItems = [excerpt ? `task description and approved ${excerpt.content.length}-character selected excerpt` : "task description only"];
+    if (proxy) executionItems.push(`advisory ModelDeck proxy candidate from ${proxy.model}`);
     return {
       routing: routingItems.join(", "),
-      execution: excerpt ? `task description and approved ${excerpt.content.length}-character selected excerpt` : "task description only"
+      execution: executionItems.join(", plus ")
     };
   }
 
@@ -112,7 +115,20 @@ export class RoutingSessionController {
 export function buildExecutionPrompt(input: RoutingSessionInput): string {
   const task = input.execution.task.trim();
   const excerpt = input.execution.selectedExcerpt;
-  if (!excerpt) return task;
-  const origin = excerpt.relativeFileName ? ` from ${excerpt.relativeFileName}` : "";
-  return `${task}\n\nUser-approved selected excerpt${origin}:\n${excerpt.content}`;
+  const proxy = input.execution.localProxyCandidate;
+  const sections = [task];
+  if (excerpt) {
+    const origin = excerpt.relativeFileName ? ` from ${excerpt.relativeFileName}` : "";
+    sections.push(`User-approved selected excerpt${origin}:\n${excerpt.content}`);
+  }
+  if (proxy) {
+    sections.push([
+      `Experimental local ModelDeck proxy candidate from ${proxy.model}.`,
+      "Review it independently. Apply it only if it is correct; normal Codex approval and verification requirements still apply.",
+      `File: ${proxy.file}`,
+      `Search:\n${proxy.search}`,
+      `Replacement:\n${proxy.replacement}`
+    ].join("\n"));
+  }
+  return sections.join("\n\n");
 }

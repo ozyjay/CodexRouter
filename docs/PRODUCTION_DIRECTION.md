@@ -14,6 +14,7 @@ The evidence-first command milestone is implemented before the sidebar:
 - routing and execution context are separate and previewed;
 - deterministic routing is the default policy;
 - ModelDeck is explicitly opt-in and experimental;
+- selected code can be sent to an explicitly confirmed ModelDeck proxy route for a constrained advisory patch preview, with no automatic workspace edit;
 - ordinal recommendation strength replaces user-facing percentage confidence;
 - App Server catalogue validation, approval-request handling, terminal states, and supported turn interruption are implemented against the inspected schema, with a live smoke test still pending;
 - privacy-safe outcomes distinguish turn state from user-observed task results and can be exported or deleted.
@@ -29,6 +30,8 @@ Describe task → route locally → review recommendation → approve/override �
 ```
 
 Its value is transparent model/effort selection, safe handling of consequential work, and evidence for whether adaptive routing improves outcomes. It should not duplicate broad file editing, Git, terminal, approvals, or agent-history interfaces that Codex already provides.
+
+The ModelDeck proxy workflow remains inside that boundary. It can propose one patch against an explicitly selected excerpt, but cannot apply it. A user can discard the preview or hand it to a normal routed Codex turn for independent review and execution.
 
 The next-level research direction is documented separately in [Adaptive orchestration and evaluation proposal](ADAPTIVE_ORCHESTRATION_PROPOSAL.md). That proposal requires a fixed Codex-native role baseline before phase-aware or subagent routing is treated as valuable.
 
@@ -65,6 +68,7 @@ Selecting **Use recommendation** starts a new App Server thread. Selecting **Ove
 
 - **Codex Router: New Routed Task** is the universal keyboard/command-palette entry point.
 - **Send Selection to Codex Router** appears in the editor context menu.
+- **Generate ModelDeck Proxy Candidate for Selection** appears beside it and requires a separate context-disclosure confirmation.
 - The status item is concise: ready model/effort, fallback, authentication issue, or App Server issue.
 - `@router` is supported only when the VS Code Chat Participant API is available. It should direct into the same routing service and recommendation flow rather than becoming a separate product.
 
@@ -77,6 +81,7 @@ VS Code extension host
   │   ├─ deterministic policy and guardrails (default)
   │   ├─ optional ModelDeck provider (loopback only)
   │   └─ recommendation validation
+  ├─ constrained ModelDeck proxy-candidate service (loopback, selected code, preview only)
   ├─ Codex App Server client (child process, stdio JSON-RPC)
   ├─ local outcome store and evaluation exporter
   └─ diagnostics service (redacted, user-visible)
@@ -88,7 +93,7 @@ Use a webview view for the composed panel once interaction complexity justifies 
 
 ## Routing model and ModelDeck profile
 
-Use a dedicated ModelDeck Routing Profile when the operator wants routing isolated from other local applications. Publish a single OpenAI-compatible capability initially:
+Use a dedicated ModelDeck Routing Profile when the operator wants routing isolated from other local applications. Publish the classifier capability when experimental classification is required:
 
 ```text
 Display name: Codex Router Classifier
@@ -97,6 +102,16 @@ Purpose: schema-constrained task classification only
 ```
 
 Configure the extension with that public model ID. The routing model must be a small local instruction-following model that reliably returns compact JSON under a low temperature. It does not need coding-agent capability; classification consistency and low latency matter more.
+
+The optional selected-code workflow uses a separate coding-capable ModelDeck route:
+
+```text
+Display name: Codex Router Proxy — Balanced
+Public model ID: codex-router-proxy-balanced
+Purpose: one schema-constrained patch candidate over explicitly supplied source
+```
+
+Operators may point `codexRouter.modelDeck.proxyModel` at another ready public route. The extension sends only the confirmed task and selected excerpt, accepts exactly one in-file patch with uniquely applicable search text, and never applies it directly. Proxy failure is terminal for that candidate; unlike classification, it does not invoke a deterministic generated fallback.
 
 Before relying on it, validate the exact active ModelDeck profile, model ID, `ready` state, JSON adherence, typical latency, and failure behaviour. If it is unavailable, the extension must visibly use deterministic fallback without attempting a cloud call.
 
@@ -108,6 +123,7 @@ Before relying on it, validate the exact active ModelDeck profile, model ID, `re
 - Keep command-based flow working independently of Chat.
 - Verify real App Server model discovery, ChatGPT auth validation, first turn, streaming, and cleanup with an explicit manual smoke test.
 - Keep ModelDeck disabled by default and smoke-test the dedicated capability only when explicitly enabled.
+- Keep the ModelDeck proxy command user-initiated, disclosure-gated, and preview-only.
 
 **Exit criterion:** an explicit task can be routed, approved/overridden, sent through Codex App Server, and completed with visible recovery states.
 
@@ -145,6 +161,7 @@ Before relying on it, validate the exact active ModelDeck profile, model ID, `re
 - Do not store source code, complete task prompts, final answers, credentials, or raw protocol traffic in analytics.
 - Respect Workspace Trust and preserve Codex sandbox/approval policies.
 - Do not silently change provider, model, effort, or authentication mode.
+- Never auto-apply a local proxy patch or treat it as trusted Codex output.
 
 ## Explicit non-goals
 

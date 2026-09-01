@@ -8,6 +8,7 @@ export interface OutcomeGroupSummary {
   routingSource: OutcomeRecord["routingSource"];
   model: string;
   effort: string;
+  localProxyModel?: string;
   sampleSize: number;
   outcomeObserved: number;
   missingOutcomeRate: number;
@@ -72,12 +73,13 @@ export class OutcomeStore {
 export function summariseOutcomes(records: readonly OutcomeRecord[]): OutcomeGroupSummary[] {
   const groups = new Map<string, OutcomeGroupSummary>();
   for (const record of records) {
-    const key = [record.policyVersion, record.routingSource, record.selected.model, record.selected.effort].join("\u0000");
+    const key = [record.policyVersion, record.routingSource, record.selected.model, record.selected.effort, record.localProxyModel ?? ""].join("\u0000");
     const group = groups.get(key) ?? {
       policyVersion: record.policyVersion,
       routingSource: record.routingSource,
       model: record.selected.model,
       effort: record.selected.effort,
+      localProxyModel: record.localProxyModel,
       sampleSize: 0,
       outcomeObserved: 0,
       missingOutcomeRate: 0,
@@ -135,15 +137,15 @@ export function renderOutcomeMarkdown(records: readonly OutcomeRecord[]): string
     "",
     `Total records: ${records.length}`,
     "",
-    "| Policy | Source | Selected allocation | Sample | Missing outcome | Override rate | Task outcomes | Build/test results | Verified | Repairs | Under-powered | Over-powered | Elapsed per verified completion | Evidence |",
-    "| --- | --- | --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |"
+    "| Policy | Source | Selected allocation | Proxy advisory | Sample | Missing outcome | Override rate | Task outcomes | Build/test results | Verified | Repairs | Under-powered | Over-powered | Elapsed per verified completion | Evidence |",
+    "| --- | --- | --- | --- | ---: | ---: | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |"
   ];
   for (const group of groups) {
     const taskOutcomes = `completed ${group.completed}; incomplete ${group.incomplete}; failed ${group.failed}; unreported ${group.sampleSize - group.outcomeObserved}`;
     const validation = `passed ${group.validationPassed}; failed ${group.validationFailed}; not run ${group.validationNotRun}; not observed ${group.validationNotObserved}; unreported ${group.validationUnreported}`;
-    lines.push(`| ${escapeCell(group.policyVersion)} | ${group.routingSource} | ${escapeCell(group.model)} / ${escapeCell(group.effort)} | ${group.sampleSize} | ${percent(group.missingOutcomeRate)} | ${percent(group.overrides / group.sampleSize)} | ${taskOutcomes} | ${validation} | ${group.verified} | ${group.repairTurns} | ${group.underPowered} | ${group.overPowered} | ${group.elapsedMsPerVerifiedCompletion === null ? "n/a" : formatDuration(group.elapsedMsPerVerifiedCompletion)} | ${group.smallSample ? "Small or incomplete sample; do not change policy" : "Descriptive evidence only"} |`);
+    lines.push(`| ${escapeCell(group.policyVersion)} | ${group.routingSource} | ${escapeCell(group.model)} / ${escapeCell(group.effort)} | ${escapeCell(group.localProxyModel ?? "none")} | ${group.sampleSize} | ${percent(group.missingOutcomeRate)} | ${percent(group.overrides / group.sampleSize)} | ${taskOutcomes} | ${validation} | ${group.verified} | ${group.repairTurns} | ${group.underPowered} | ${group.overPowered} | ${group.elapsedMsPerVerifiedCompletion === null ? "n/a" : formatDuration(group.elapsedMsPerVerifiedCompletion)} | ${group.smallSample ? "Small or incomplete sample; do not change policy" : "Descriptive evidence only"} |`);
   }
-  if (groups.length === 0) lines.push("| — | — | — | 0 | — | — | — | — | — | — | — | — | — | No outcome records | ");
+  if (groups.length === 0) lines.push("| — | — | — | — | 0 | — | — | — | — | — | — | — | — | — | No outcome records | ");
   lines.push("", "Verified completion requires a user-reported completed task and a passed build/test result. Not run, not observed, and unreported validation do not count as verified.", "");
   return lines.join("\n");
 }
@@ -163,6 +165,7 @@ function isOutcomeRecord(value: unknown): value is OutcomeRecord {
     && typeof record.taskOutcome === "string"
     && typeof record.validationStatus === "string"
     && typeof record.allocationJudgement === "string"
+    && (record.localProxyModel === undefined || typeof record.localProxyModel === "string")
     && Boolean(record.recommendation)
     && Boolean(record.selected);
 }

@@ -22,6 +22,11 @@
         "category": "Codex Router"
       },
       {
+        "command": "codexRouter.generateProxyCandidate",
+        "title": "Generate ModelDeck Proxy Candidate for Selection",
+        "category": "Codex Router"
+      },
+      {
         "command": "codexRouter.showDiagnostics",
         "title": "Show Diagnostics",
         "category": "Codex Router"
@@ -46,6 +51,11 @@
       "editor/context": [
         {
           "command": "codexRouter.routeSelection",
+          "group": "codexRouter",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "codexRouter.generateProxyCandidate",
           "group": "codexRouter",
           "when": "editorHasSelection"
         }
@@ -82,6 +92,25 @@
           "type": "string",
           "default": "",
           "description": "Optional ModelDeck model ID used for routing. Leave empty to select the first ready local model."
+        },
+        "codexRouter.modelDeck.proxyModel": {
+          "type": "string",
+          "default": "codex-router-proxy-balanced",
+          "description": "ModelDeck model ID used only for explicitly requested selected-code proxy candidates."
+        },
+        "codexRouter.modelDeck.proxyTimeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 1000,
+          "maximum": 300000,
+          "description": "Maximum time to wait for an explicitly requested local proxy candidate."
+        },
+        "codexRouter.modelDeck.proxyMaxTokens": {
+          "type": "number",
+          "default": 2048,
+          "minimum": 256,
+          "maximum": 8192,
+          "description": "Maximum output-token budget for an explicitly requested local proxy candidate."
         },
         "codexRouter.requestTimeoutMs": {
           "type": "number",

@@ -59,3 +59,30 @@ test("routing session cancellation remains active throughout execution", async (
 test("execution prompt excludes source unless it is explicitly present", () => {
   assert.equal(buildExecutionPrompt({ routing: { task: "Task" }, execution: { task: "Task" } }), "Task");
 });
+
+test("proxy candidates are withheld from routing and clearly labelled for Codex review", async () => {
+  const proxyInput: RoutingSessionInput = {
+    routing: input.routing,
+    execution: {
+      ...input.execution,
+      localProxyCandidate: {
+        model: "codex-router-proxy-balanced",
+        file: "test/example.test.ts",
+        search: "old assertion",
+        replacement: "new assertion"
+      }
+    }
+  };
+  let routingPayload = "";
+  const session = new RoutingSessionController(proxyInput, async (routing) => {
+    routingPayload = JSON.stringify(routing);
+    return fallbackRoute(routing);
+  }, { execute: async () => "completed" });
+  await session.analyse(models);
+  assert.doesNotMatch(routingPayload, /old assertion|new assertion|proxy-balanced/);
+  assert.match(session.contextSummary().execution, /advisory ModelDeck proxy candidate/);
+  const prompt = buildExecutionPrompt(proxyInput);
+  assert.match(prompt, /Review it independently/);
+  assert.match(prompt, /old assertion/);
+  assert.match(prompt, /new assertion/);
+});

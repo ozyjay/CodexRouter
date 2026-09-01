@@ -78,3 +78,17 @@ test("outcome store retains completed, failed and cancelled turn states without 
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("outcome reports separate proxy-assisted and unassisted Codex turns without storing the candidate", () => {
+  const records = [
+    outcome({ recordId: "without-proxy" }),
+    outcome({ recordId: "with-proxy", localProxyModel: "codex-router-proxy-balanced" })
+  ];
+  const summaries = summariseOutcomes(records);
+  assert.equal(summaries.length, 2);
+  assert.deepEqual(summaries.map((summary) => summary.localProxyModel), [undefined, "codex-router-proxy-balanced"]);
+  const report = renderOutcomeMarkdown(records);
+  assert.match(report, /Proxy advisory/);
+  assert.match(report, /codex-router-proxy-balanced/);
+  assert.doesNotMatch(report, /search|replacement/i);
+});

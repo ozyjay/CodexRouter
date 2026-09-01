@@ -96,11 +96,19 @@ export interface SelectedExcerpt {
   languageId?: string;
 }
 
+export interface LocalProxyCandidate {
+  model: string;
+  file: string;
+  search: string;
+  replacement: string;
+}
+
 export interface RoutingSessionInput {
   routing: RoutingInput;
   execution: {
     task: string;
     selectedExcerpt?: SelectedExcerpt;
+    localProxyCandidate?: LocalProxyCandidate;
   };
 }
 
@@ -130,4 +138,5 @@ export interface OutcomeRecord {
   allocationJudgement: "appropriate" | "under-powered" | "over-powered" | "unsure" | "unreported";
   catalogueFallback?: CatalogueFallback["reason"];
   providerFallback?: ProviderFallback;
+  localProxyModel?: string;
 }

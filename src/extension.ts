@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { CodexAppServer, isChatGPTAuthentication } from "./appServer";
 import { AllocationSelection, CodexModel, OUTCOME_SCHEMA_VERSION, ReasoningEffort, RoutingInput, RoutingProvider, RoutingRecommendation, RoutingSessionInput, TurnState } from "./contracts";
-import { ModelDeckProvider } from "./modelDeck";
+import { ModelDeckProvider, ProxyCandidateError, assertModelDeckModelId, classifyModelDeckFailure } from "./modelDeck";
 import { OutcomeStore, renderOutcomeMarkdown } from "./outcomes";
 import { recommendWithProvider } from "./policy";
+import { prepareSelectionProxyCandidate, renderProxyCandidateMarkdown } from "./proxy";
 import { RoutingSessionController } from "./session";
 
 let appServer: CodexAppServer | undefined;
@@ -34,6 +35,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("codexRouter.newRoutedTask", () => newRoutedTask(context)),
     vscode.commands.registerCommand("codexRouter.routeSelection", () => routeSelection(context)),
+    vscode.commands.registerCommand("codexRouter.generateProxyCandidate", () => generateProxyCandidate(context)),
     vscode.commands.registerCommand("codexRouter.cancelActiveTurn", () => cancelActiveTurn()),
     vscode.commands.registerCommand("codexRouter.exportOutcomes", () => exportOutcomes(context)),
     vscode.commands.registerCommand("codexRouter.clearOutcomes", () => clearOutcomes(context)),
@@ -114,6 +116,97 @@ async function routeSelection(context: vscode.ExtensionContext): Promise<void> {
   }, notificationSink());
 }
 
+async function generateProxyCandidate(context: vscode.ExtensionContext): Promise<void> {
+  if (!vscode.workspace.isTrusted) {
+    void vscode.window.showWarningMessage("Codex Router requires a trusted workspace before it can send selected code to ModelDeck.");
+    return;
+  }
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.selection.isEmpty) return;
+  if (!vscode.workspace.getWorkspaceFolder(editor.document.uri)) {
+    void vscode.window.showWarningMessage("Select code from a file inside the open workspace before using the ModelDeck proxy.");
+    return;
+  }
+  const selected = editor.document.getText(editor.selection);
+  if (selected.length > 12_000) {
+    void vscode.window.showWarningMessage("The ModelDeck proxy accepts at most 12,000 selected characters. Narrow the selection and try again.");
+    return;
+  }
+  const task = await vscode.window.showInputBox({
+    title: "Codex Router: ModelDeck Proxy Candidate",
+    prompt: "Describe the change to propose for the selected code",
+    ignoreFocusOut: true,
+    validateInput: (value) => value.length > 4_000 ? "Keep the task description to 4,000 characters or fewer." : undefined
+  });
+  if (!task?.trim()) return;
+
+  const configuration = vscode.workspace.getConfiguration("codexRouter");
+  const model = configuration.get<string>("modelDeck.proxyModel", "codex-router-proxy-balanced").trim();
+  if (!model) {
+    void vscode.window.showWarningMessage("Configure codexRouter.modelDeck.proxyModel before generating a proxy candidate.");
+    return;
+  }
+  let provider: ModelDeckProvider;
+  try {
+    assertModelDeckModelId(model);
+    provider = new ModelDeckProvider({
+      baseUrl: configuration.get<string>("modelDeck.baseUrl", "http://127.0.0.1:8600/v1"),
+      timeoutMs: configuration.get<number>("modelDeck.proxyTimeoutMs", 120_000),
+      proxyMaxTokens: configuration.get<number>("modelDeck.proxyMaxTokens", 2_048)
+    });
+  } catch {
+    void vscode.window.showWarningMessage("The configured ModelDeck endpoint is invalid. Codex Router permits only literal loopback addresses.");
+    return;
+  }
+
+  const relativeFileName = vscode.workspace.asRelativePath(editor.document.uri).replace(/\\/g, "/");
+  const confirmation = await vscode.window.showWarningMessage(
+    `Send the task and ${selected.length} selected characters from ${relativeFileName} to the loopback ModelDeck model ${model}? No workspace change or Codex turn starts at this step.`,
+    { modal: true },
+    "Generate candidate"
+  );
+  if (confirmation !== "Generate candidate") return;
+
+  const sink = notificationSink();
+  sink.progress(`Generating a constrained candidate with ${model}…`);
+  try {
+    const generated = await provider.generateProxyCandidate(model, {
+      task: task.trim(),
+      allowedFiles: [relativeFileName],
+      context: [{ file: relativeFileName, content: selected }],
+      maxPatches: 1
+    });
+    const candidate = prepareSelectionProxyCandidate(generated, relativeFileName, selected);
+    sink.text(renderProxyCandidateMarkdown(candidate));
+    const action = await vscode.window.showInformationMessage(
+      "ModelDeck generated an advisory candidate. Review the preview before routing it through Codex.",
+      "Route candidate through Codex"
+    );
+    if (action !== "Route candidate through Codex") return;
+    await routeAndRun(context, {
+      routing: {
+        task: task.trim(),
+        metadata: {
+          languageId: editor.document.languageId,
+          relativeFileName,
+          workspaceFolderCount: vscode.workspace.workspaceFolders?.length,
+          selectionPresent: true,
+          selectedCharacters: selected.length
+        }
+      },
+      execution: {
+        task: task.trim(),
+        selectedExcerpt: { content: selected, relativeFileName, languageId: editor.document.languageId },
+        localProxyCandidate: candidate
+      }
+    }, sink);
+  } catch (error) {
+    const reason = error instanceof ProxyCandidateError ? error.reason : classifyModelDeckFailure(error);
+    output.appendLine(`[proxy candidate] rejected: ${reason}`);
+    sink.text(`ModelDeck could not provide a usable proxy candidate (${reason}). No workspace change or Codex turn was started.`);
+  }
+}
+
 async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessionInput, sink: StreamSink): Promise<void> {
   if (!vscode.workspace.isTrusted) {
     sink.text("Codex Router requires a trusted workspace before it can submit a coding task.");
@@ -156,7 +249,7 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
     sink.text(turnState === "completed" ? "\n\nCodex turn completed.\n" : turnState === "cancelled" ? "\n\nCodex turn cancelled.\n" : "\n\nCodex turn failed.\n");
     setStatus("ready", choice.model, choice.effort);
     outcomeRecorded = true;
-    await safeRecordOutcome(context, recommendation, choice, Date.now() - startedAt, turnState);
+    await safeRecordOutcome(context, recommendation, choice, Date.now() - startedAt, turnState, input.execution.localProxyCandidate?.model);
   } catch (error) {
     const cancelled = session?.state === "cancelled";
     const message = error instanceof Error ? error.message : "Unexpected routing error.";
@@ -166,7 +259,7 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
     if (!outcomeRecorded && session?.recommendation && session.selection && startedAt !== undefined) {
       turnState = cancelled ? "cancelled" : "failed";
       outcomeRecorded = true;
-      await safeRecordOutcome(context, session.recommendation, session.selection, Date.now() - startedAt, turnState);
+      await safeRecordOutcome(context, session.recommendation, session.selection, Date.now() - startedAt, turnState, input.execution.localProxyCandidate?.model);
     }
   } finally {
     cancellationDisposable?.dispose();
@@ -253,7 +346,7 @@ async function streamTurn(server: CodexAppServer, threadId: string, turnId: stri
   });
 }
 
-async function recordOutcome(context: vscode.ExtensionContext, recommendation: RoutingRecommendation, selected: AllocationSelection, durationMs: number, turnState: TurnState): Promise<void> {
+async function recordOutcome(context: vscode.ExtensionContext, recommendation: RoutingRecommendation, selected: AllocationSelection, durationMs: number, turnState: TurnState, localProxyModel?: string): Promise<void> {
   if (!vscode.workspace.getConfiguration("codexRouter").get<boolean>("analytics.enabled", false)) return;
   const feedback = await collectOutcomeFeedback();
   const paths = vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [];
@@ -273,12 +366,13 @@ async function recordOutcome(context: vscode.ExtensionContext, recommendation: R
     turnState,
     ...feedback,
     catalogueFallback: recommendation.catalogueFallback?.reason,
-    providerFallback: recommendation.providerFallback
+    providerFallback: recommendation.providerFallback,
+    localProxyModel
   });
 }
 
-async function safeRecordOutcome(context: vscode.ExtensionContext, recommendation: RoutingRecommendation, selected: AllocationSelection, durationMs: number, turnState: TurnState): Promise<void> {
-  try { await recordOutcome(context, recommendation, selected, durationMs, turnState); }
+async function safeRecordOutcome(context: vscode.ExtensionContext, recommendation: RoutingRecommendation, selected: AllocationSelection, durationMs: number, turnState: TurnState, localProxyModel?: string): Promise<void> {
+  try { await recordOutcome(context, recommendation, selected, durationMs, turnState, localProxyModel); }
   catch {
     output.appendLine("[outcome error] Unable to store the local privacy-safe outcome record.");
     void vscode.window.showWarningMessage("Codex Router could not store the local outcome record. The Codex turn result is unaffected.");

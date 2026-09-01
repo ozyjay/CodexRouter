@@ -67,6 +67,7 @@ export class ProxyCandidateError extends Error {
 export class ModelDeckProvider {
   public constructor(private readonly config: ModelDeckConfig) {
     assertLoopbackUrl(config.baseUrl);
+    if (config.routerModel) assertModelDeckModelId(config.routerModel);
   }
 
   async discoverModels(): Promise<string[]> {
@@ -74,6 +75,7 @@ export class ModelDeckProvider {
   }
 
   async snapshotRoutes(modelIds: readonly string[]): Promise<Record<string, ModelDeckRouteIdentity>> {
+    modelIds.forEach(assertModelDeckModelId);
     const response = await this.request("models", { method: "GET" });
     const payload = await response.json() as { data?: ModelDeckModel[] };
     if (!Array.isArray(payload.data)) throw new Error("ModelDeck returned an invalid /models response.");
@@ -176,6 +178,8 @@ export class ModelDeckProvider {
 
   async generateProxyCandidate(model: string, input: ProxyCandidateInput, maxTokens = this.config.proxyMaxTokens ?? 2_048): Promise<ProxyCandidate> {
     if (!isValidProxyCandidateInput(input)) throw new Error("Invalid constrained proxy-candidate input.");
+    assertModelDeckModelId(model);
+    if (!Number.isInteger(maxTokens) || maxTokens < 256 || maxTokens > 8_192) throw new Error("Invalid ModelDeck proxy token budget.");
     const discovered = await this.discoverReadyModels();
     const selectedModel = discovered.find((candidate) => candidate.id === model);
     if (!selectedModel) throw new Error("The configured ModelDeck proxy model is not ready.");
@@ -208,7 +212,7 @@ export class ModelDeckProvider {
     const response = await this.request("models", { method: "GET" });
     const payload = await response.json() as { data?: ModelDeckModel[] };
     if (!Array.isArray(payload.data)) throw new Error("ModelDeck returned an invalid /models response.");
-    return payload.data.filter((model) => model.ready !== false && typeof model.id === "string" && model.id.length > 0);
+    return payload.data.filter((model) => model.ready !== false && isSafeModelId(model.id));
   }
 
   private async request(path: string, init: RequestInit): Promise<Response> {
@@ -260,6 +264,10 @@ export function assertLoopbackUrl(value: string): void {
     throw new Error("Codex Router only permits loopback ModelDeck endpoints.");
   }
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("ModelDeck URL must use HTTP or HTTPS.");
+}
+
+export function assertModelDeckModelId(value: string): void {
+  if (!isSafeModelId(value)) throw new Error("Invalid ModelDeck model ID.");
 }
 
 function parseJsonObject(content: string): unknown {
@@ -320,7 +328,17 @@ function isValidProxyCandidate(value: unknown, input: ProxyCandidateInput): valu
 }
 
 function isSafeRelativeFile(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 256 && !value.startsWith("/") && !value.split("/").includes("..");
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 256
+    && !value.startsWith("/")
+    && !value.includes("\\")
+    && !/^[A-Za-z]:/.test(value)
+    && value.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
+}
+
+function isSafeModelId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 128 && !/[\r\n\u0000-\u001f]/.test(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -346,7 +364,7 @@ confidence: number from 0 to 1;
 rationale: a concise explanation of at most 160 characters.
 Choose sim-small for focused, low-risk work; sim-balanced for ordinary bounded changes; sim-strong for ambiguous, broad, destructive, security-sensitive, or high-risk work. You select a declared deterministic scenario only. Do not propose commands, patches, source code, paths, credentials, Markdown, or prose outside the JSON object.`;
 
-const PROXY_CANDIDATE_PROMPT = `You are a constrained local proxy in an evaluation harness. Return only one JSON object with exactly this field:
+const PROXY_CANDIDATE_PROMPT = `You are a constrained local proxy candidate generator. Return only one JSON object with exactly this field:
 patches: an array of one to the supplied maximum number of patch objects.
 Every patch object must have exactly these fields:
 file: one of the supplied allowedFiles;

@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl, classifyModelDeckFailure } from "../src/modelDeck";
+import { ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl, assertModelDeckModelId, classifyModelDeckFailure } from "../src/modelDeck";
 
 test("ModelDeck provider rejects non-loopback endpoints", () => {
   assert.throws(() => assertLoopbackUrl("https://example.com/v1"), /loopback/);
+});
+
+test("ModelDeck model IDs reject control characters", () => {
+  assert.doesNotThrow(() => assertModelDeckModelId("codex-router-proxy-balanced"));
+  assert.throws(() => assertModelDeckModelId("proxy\nspoofed"), /model ID/);
 });
 
 test("ModelDeck route snapshots retain only configured safe identities", async () => {
