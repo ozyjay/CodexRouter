@@ -102,7 +102,8 @@ test("simulated execution applies only its declared deterministic patch", async 
   const evaluationCase = manifest.cases[0];
   try {
     await writeFile(join(directory, "test-routing.test.ts"), "original", "utf8");
-    const simulation = { ...evaluationCase.simulation!, file: "test-routing.test.ts" };
+    if (!evaluationCase.simulation || "patches" in evaluationCase.simulation) throw new Error("This fixture requires a single simulation patch.");
+    const simulation = { ...evaluationCase.simulation, file: "test-routing.test.ts" };
     assert.equal((await runSimulation(directory, simulation)).exitCode, 0);
     assert.equal(await readFile(join(directory, "test-routing.test.ts"), "utf8"), "simulated");
   } finally {
@@ -125,6 +126,7 @@ test("simulated execution applies every patch in a declared deterministic scenar
 test("simulation profiles select only declared deterministic patches", () => {
   const selected = simulationPatchForProfile({ ...manifest.cases[0], simulationProfiles: { "sim-small": { file: "test/routing.test.ts", search: "small", replacement: "small-result" } } }, "sim-small");
   assert.equal(selected.profile, "sim-small");
+  if (!selected.patch || "patches" in selected.patch) throw new Error("This fixture requires a single simulation patch.");
   assert.equal(selected.patch?.replacement, "small-result");
   const fallback = simulationPatchForProfile(manifest.cases[0], "sim-strong");
   assert.equal(fallback.profile, "sim-strong");
@@ -147,7 +149,8 @@ test("simulated execution fails safely when its patch cannot be applied", async 
   const evaluationCase = manifest.cases[0];
   try {
     await writeFile(join(directory, "test-routing.test.ts"), "original", "utf8");
-    const simulation = { ...evaluationCase.simulation!, file: "test-routing.test.ts", search: "missing" };
+    if (!evaluationCase.simulation || "patches" in evaluationCase.simulation) throw new Error("This fixture requires a single simulation patch.");
+    const simulation = { ...evaluationCase.simulation, file: "test-routing.test.ts", search: "missing" };
     assert.equal((await runSimulation(directory, simulation)).exitCode, 1);
     assert.equal(await readFile(join(directory, "test-routing.test.ts"), "utf8"), "original");
   } finally {

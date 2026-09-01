@@ -18,10 +18,10 @@ try {
     "compile" { & npx --no-install tsc -p . }
     "watch" { & npx --no-install tsc -watch -p . }
     "test" { & npx --no-install tsx --test "test/**/*.test.ts" }
-    "check-baseline" { & npx --no-install tsc --noEmit --target ES2022 --module commonjs --strict --esModuleInterop --skipLibCheck scripts/baseline-eval.ts }
+    "check-baseline" { & npx --no-install tsc -p tsconfig.tests.json }
     "check" {
       & npx --no-install tsc -p .
-      if ($LASTEXITCODE -eq 0) { & npx --no-install tsc --noEmit --target ES2022 --module commonjs --strict --esModuleInterop --skipLibCheck scripts/baseline-eval.ts }
+      if ($LASTEXITCODE -eq 0) { & npx --no-install tsc -p tsconfig.tests.json }
       if ($LASTEXITCODE -eq 0) { & npx --no-install tsx --test "test/**/*.test.ts" }
     }
     "eval-baseline" { & npx --no-install tsx scripts/baseline-eval.ts @ForwardedArguments }

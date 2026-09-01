@@ -27,14 +27,16 @@ test("App Server correlates requests and forwards stream notifications", async (
   process.kill = () => { process.killed = true; return true; };
   process.stdin = new FakeStdin((line) => {
     const request = JSON.parse(line) as { id?: number; method?: string; params?: unknown };
-    if (request.id === undefined || request.method === undefined) return;
-    requests.push(request);
-    const result = request.method === "account/read" ? { account: { type: "chatgpt", email: null, planType: "plus" }, requiresOpenaiAuth: false }
-      : request.method === "model/list" ? { data: [{ id: "terra", model: "gpt-5.6-terra", displayName: "Terra", description: "", hidden: false, supportedReasoningEfforts: [{ reasoningEffort: "medium" }], defaultReasoningEffort: "medium", isDefault: true }] }
-      : request.method === "thread/start" ? { thread: { id: "thread-1" } }
-      : request.method === "turn/start" ? { turn: { id: "turn-1" } }
+    const id = request.id;
+    const method = request.method;
+    if (typeof id !== "number" || typeof method !== "string") return;
+    requests.push({ id, method, params: request.params });
+    const result = method === "account/read" ? { account: { type: "chatgpt", email: null, planType: "plus" }, requiresOpenaiAuth: false }
+      : method === "model/list" ? { data: [{ id: "terra", model: "gpt-5.6-terra", displayName: "Terra", description: "", hidden: false, supportedReasoningEfforts: [{ reasoningEffort: "medium" }], defaultReasoningEffort: "medium", isDefault: true }] }
+      : method === "thread/start" ? { thread: { id: "thread-1" } }
+      : method === "turn/start" ? { turn: { id: "turn-1" } }
       : { userAgent: "test" };
-    queueMicrotask(() => stdout.emit("data", `${JSON.stringify({ id: request.id, result })}\n`));
+    queueMicrotask(() => stdout.emit("data", `${JSON.stringify({ id, result })}\n`));
   });
 
   const server = new CodexAppServer(() => process as never);

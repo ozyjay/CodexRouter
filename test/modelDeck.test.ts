@@ -61,7 +61,7 @@ test("ModelDeck classifier receives metadata but never execution source", async 
   const originalFetch = globalThis.fetch;
   let requestCount = 0;
   let requestBody = "";
-  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     requestCount++;
     if (requestCount === 2 && typeof init?.body === "string") requestBody = init.body;
     return new Response(JSON.stringify(requestCount === 1
@@ -86,7 +86,7 @@ test("ModelDeck unavailable, no-ready-model and timeout failures are classified 
   assert.equal(classifyModelDeckFailure(new Error("ModelDeck request timed out.")), "timeout");
 
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+  globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
     init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
   })) as typeof fetch;
   try {
@@ -137,7 +137,7 @@ test("ModelDeck proxy candidates are restricted to declared contextual files and
   const originalFetch = globalThis.fetch;
   let requestCount = 0;
   let completionBody: { max_tokens?: number } | undefined;
-  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     requestCount++;
     if (requestCount === 2 && typeof init?.body === "string") completionBody = JSON.parse(init.body) as { max_tokens?: number };
     return new Response(JSON.stringify(requestCount === 1

@@ -13,6 +13,7 @@ export interface Allocation {
 }
 
 export interface FixedRoleAllocations {
+  [role: string]: Allocation;
   parent: Allocation;
   explorer: Allocation;
   worker: Allocation;
