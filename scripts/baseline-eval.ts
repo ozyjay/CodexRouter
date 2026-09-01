@@ -32,7 +32,9 @@ interface Options {
   modelDeckModel: string;
   selectorTimeoutMs: number;
   proxyTimeoutMs: number;
+  proxyReadyTimeoutMs: number;
   proxyMaxTokens: number;
+  proxyTokenBudgets: Record<SimulationProfile, number>;
   proxyModels: Record<SimulationProfile, string>;
 }
 
@@ -73,19 +75,23 @@ async function main(): Promise<void> {
     : undefined;
   const capabilityRouteIds = executionBackend === "slm-proxy" ? capabilityRouteIdsFor(options) : [];
   const capabilitySnapshot = proxyProvider ? await proxyProvider.snapshotRoutes(capabilityRouteIds) : undefined;
+  const proxyReadiness = proxyProvider
+    ? await proxyProvider.waitForReadyModels(proxyModelsForReadiness(selectedCases, options.proxyModels), { timeoutMs: options.proxyReadyTimeoutMs, pollIntervalMs: 2_000, consecutiveReadyChecks: 2 })
+    : undefined;
+  if (proxyProvider && capabilitySnapshot) await assertCapabilitySnapshot(proxyProvider, capabilityRouteIds, capabilitySnapshot);
   const strategies = strategiesForExecutionBackend(executionBackend);
   const runs: EvaluationRunResult[] = [];
   for (const evaluationCase of selectedCases) {
     for (let iteration = 1; iteration <= options.iterations; iteration++) {
       for (const strategy of strategies) {
         if (proxyProvider && capabilitySnapshot) await assertCapabilitySnapshot(proxyProvider, capabilityRouteIds, capabilitySnapshot);
-        runs.push(await runEvaluation(manifest, evaluationCase, strategy, resolvedRef, iteration, executionBackend, options.selector, modelDeck, proxyProvider, options.proxyModels));
+        runs.push(await runEvaluation(manifest, evaluationCase, strategy, resolvedRef, iteration, executionBackend, options.selector, modelDeck, proxyProvider, options.proxyModels, options.proxyReadyTimeoutMs, options.proxyMaxTokens, options.proxyTokenBudgets));
         if (proxyProvider && capabilitySnapshot) await assertCapabilitySnapshot(proxyProvider, capabilityRouteIds, capabilitySnapshot);
       }
     }
   }
   const report = {
-    version: 7,
+    version: 9,
     generatedAt: new Date().toISOString(),
     requestedRef: options.ref,
     ref: resolvedRef,
@@ -102,6 +108,12 @@ async function main(): Promise<void> {
       performanceAttribution: "local-proxy-only",
       selector: options.selector === "modeldeck" ? { kind: "modeldeck", publicModelId: options.modelDeckModel } : { kind: "deterministic" },
       proxyMaxTokens: options.proxyMaxTokens,
+      proxyTokenBudgets: options.proxyTokenBudgets,
+      readinessPreflight: proxyReadiness ? {
+        ...proxyReadiness,
+        timeoutMs: options.proxyReadyTimeoutMs,
+        pollIntervalMs: 2_000
+      } : undefined,
       profileModels: options.proxyModels,
       capabilitySnapshot
     } : undefined,
@@ -114,7 +126,7 @@ async function main(): Promise<void> {
   process.stdout.write(`${JSON.stringify({ resultPath, executionBackend, summary: report.summary }, null, 2)}\n`);
 }
 
-async function runEvaluation(manifest: EvaluationManifest, evaluationCase: EvaluationCase, strategy: EvaluationStrategy, ref: string, iteration: number, executionBackend: EvaluationExecutionBackend, selectorKind: SimulationSelectorKind, selector?: SimulationSelector, proxyProvider?: ModelDeckProvider, proxyModels?: Record<SimulationProfile, string>): Promise<EvaluationRunResult> {
+async function runEvaluation(manifest: EvaluationManifest, evaluationCase: EvaluationCase, strategy: EvaluationStrategy, ref: string, iteration: number, executionBackend: EvaluationExecutionBackend, selectorKind: SimulationSelectorKind, selector?: SimulationSelector, proxyProvider?: ModelDeckProvider, proxyModels?: Record<SimulationProfile, string>, proxyReadyTimeoutMs?: number, proxyMaxTokens?: number, proxyTokenBudgets?: Record<SimulationProfile, number>): Promise<EvaluationRunResult> {
   const directory = await mkdtemp(join(tmpdir(), "codex-router-baseline-"));
   try {
     await run("git", ["worktree", "add", "--detach", directory, ref]);
@@ -131,7 +143,7 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
       ? await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", buildPrompt(strategy, evaluationCase)])
       : executionBackend === "simulated"
         ? await runSimulation(directory, simulation?.patch)
-        : await runProxyCandidate(directory, evaluationCase, simulation!, proxyProvider!, proxyModels!, (metadata) => { proxy = metadata; });
+        : await runProxyCandidate(directory, evaluationCase, simulation!, proxyProvider!, proxyModels!, proxyReadyTimeoutMs!, proxyMaxTokens!, proxyTokenBudgets!, (metadata) => { proxy = metadata; });
     const executionExitCode = execution.exitCode;
     const validationExitCode = executionExitCode === 0 ? await runValidation(directory, evaluationCase) : null;
     const expectationPassed = executionExitCode === 0 ? await matchesExpectation(directory, evaluationCase) : null;
@@ -245,21 +257,47 @@ export async function assertCapabilitySnapshot(provider: Pick<ModelDeckProvider,
   if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("ModelDeck capability routes changed during the evaluation cohort.");
 }
 
+export function proxyModelsForReadiness(cases: readonly EvaluationCase[], proxyModels: Record<SimulationProfile, string>): string[] {
+  const profiles = new Set<SimulationProfile>();
+  for (const evaluationCase of cases) {
+    if (evaluationCase.expectedSimulationProfile) profiles.add(evaluationCase.expectedSimulationProfile);
+    else {
+      profiles.add("sim-small");
+      profiles.add("sim-balanced");
+      profiles.add("sim-strong");
+    }
+  }
+  return [...new Set([...profiles].map((profile) => proxyModels[profile]))];
+}
+
 function validateProxyCases(cases: readonly EvaluationCase[]): void {
   const missing = cases.filter((evaluationCase) => !evaluationCase.proxy).map((evaluationCase) => evaluationCase.id);
   if (missing.length > 0) throw new Error(`--slm-proxy requires proxy constraints for every selected case: ${missing.join(", ")}.`);
 }
 
-async function runProxyCandidate(directory: string, evaluationCase: EvaluationCase, simulation: ResolvedSimulation, provider: ModelDeckProvider, proxyModels: Record<SimulationProfile, string>, onMetadata: (metadata: ProxyRunMetadata) => void): Promise<{ exitCode: number; stderr: string }> {
+async function runProxyCandidate(directory: string, evaluationCase: EvaluationCase, simulation: ResolvedSimulation, provider: ModelDeckProvider, proxyModels: Record<SimulationProfile, string>, proxyReadyTimeoutMs: number, proxyMaxTokens: number, proxyTokenBudgets: Record<SimulationProfile, number>, onMetadata: (metadata: ProxyRunMetadata) => void): Promise<{ exitCode: number; stderr: string }> {
   const constraints = evaluationCase.proxy;
   if (!constraints) return { exitCode: 1, stderr: "" };
   const startedAt = Date.now();
   const selectedModel = proxyModels[simulation.metadata.selectedProfile];
+  const maxTokens = Math.min(proxyTokenBudgets[simulation.metadata.selectedProfile], proxyMaxTokens);
   let context: Array<{ file: string; content: string }>;
   try {
     context = await readProxyContext(directory, constraints);
   } catch {
-    onMetadata({ selectedProfile: simulation.metadata.selectedProfile, status: "context-error", candidateDurationMs: Date.now() - startedAt });
+    onMetadata({ selectedProfile: simulation.metadata.selectedProfile, status: "context-error", maxTokens, candidateDurationMs: Date.now() - startedAt });
+    return { exitCode: 1, stderr: "" };
+  }
+  let readiness: { readyAfterMs: number; consecutiveReadyChecks: number };
+  try {
+    readiness = await provider.waitForReadyModels([selectedModel], { timeoutMs: proxyReadyTimeoutMs, pollIntervalMs: 2_000, consecutiveReadyChecks: 2 });
+  } catch {
+    onMetadata({
+      selectedProfile: simulation.metadata.selectedProfile,
+      status: "unavailable",
+      maxTokens,
+      candidateDurationMs: Date.now() - startedAt
+    });
     return { exitCode: 1, stderr: "" };
   }
   try {
@@ -268,12 +306,15 @@ async function runProxyCandidate(directory: string, evaluationCase: EvaluationCa
       allowedFiles: constraints.allowedFiles,
       context,
       maxPatches: constraints.maxPatches ?? 3
-    });
+    }, maxTokens);
     const execution = await runSimulation(directory, { patches: candidate.patches });
     onMetadata({
       selectedProfile: simulation.metadata.selectedProfile,
       status: execution.exitCode === 0 ? "applied" : "inapplicable",
       model: candidate.model,
+      maxTokens,
+      readinessWaitMs: readiness.readyAfterMs,
+      readinessChecks: readiness.consecutiveReadyChecks,
       candidateDurationMs: Date.now() - startedAt,
       patchCount: candidate.patches.length
     });
@@ -285,6 +326,9 @@ async function runProxyCandidate(directory: string, evaluationCase: EvaluationCa
       selectedProfile: simulation.metadata.selectedProfile,
       status: /not ready|request failed|abort/i.test(message) ? "unavailable" : "invalid",
       rejectionReason,
+      maxTokens,
+      readinessWaitMs: readiness.readyAfterMs,
+      readinessChecks: readiness.consecutiveReadyChecks,
       candidateDurationMs: Date.now() - startedAt
     });
     return { exitCode: 1, stderr: "" };
@@ -436,7 +480,7 @@ async function run(command: string, args: string[], options: { cwd?: string; all
 }
 
 function parseArguments(argumentsList: string[]): Options {
-  const options: Options = { live: false, simulated: false, slmProxy: false, manifestPath: resolve("evals/baseline-manifest.json"), resultsDirectory: resolve("evals/results"), ref: "HEAD", iterations: 1, selector: "deterministic", modelDeckBaseUrl: "http://127.0.0.1:8600/v1", modelDeckModel: "codex-router-simulation-selector", selectorTimeoutMs: 15_000, proxyTimeoutMs: 180_000, proxyMaxTokens: 2_048, proxyModels: { "sim-small": "codex-router-proxy-small", "sim-balanced": "codex-router-proxy-balanced", "sim-strong": "codex-router-proxy-strong" } };
+  const options: Options = { live: false, simulated: false, slmProxy: false, manifestPath: resolve("evals/baseline-manifest.json"), resultsDirectory: resolve("evals/results"), ref: "HEAD", iterations: 1, selector: "deterministic", modelDeckBaseUrl: "http://127.0.0.1:8600/v1", modelDeckModel: "codex-router-simulation-selector", selectorTimeoutMs: 15_000, proxyTimeoutMs: 180_000, proxyReadyTimeoutMs: 60_000, proxyMaxTokens: 2_048, proxyTokenBudgets: { "sim-small": 256, "sim-balanced": 256, "sim-strong": 2_048 }, proxyModels: { "sim-small": "codex-router-proxy-small", "sim-balanced": "codex-router-proxy-balanced", "sim-strong": "codex-router-proxy-strong" } };
   for (let index = 0; index < argumentsList.length; index++) {
     const argument = argumentsList[index];
     if (argument === "--live") options.live = true;
@@ -452,7 +496,11 @@ function parseArguments(argumentsList: string[]): Options {
     else if (argument === "--modeldeck-model") options.modelDeckModel = requiredValue(argumentsList, ++index, argument);
     else if (argument === "--selector-timeout-ms") options.selectorTimeoutMs = positiveInteger(requiredValue(argumentsList, ++index, argument), argument);
     else if (argument === "--proxy-timeout-ms") options.proxyTimeoutMs = positiveInteger(requiredValue(argumentsList, ++index, argument), argument);
+    else if (argument === "--proxy-ready-timeout-ms") options.proxyReadyTimeoutMs = boundedPositiveInteger(requiredValue(argumentsList, ++index, argument), argument, 1_000, 300_000);
     else if (argument === "--proxy-max-tokens") options.proxyMaxTokens = boundedPositiveInteger(requiredValue(argumentsList, ++index, argument), argument, 256, 8_192);
+    else if (argument === "--proxy-max-tokens-small") options.proxyTokenBudgets["sim-small"] = boundedPositiveInteger(requiredValue(argumentsList, ++index, argument), argument, 64, 8_192);
+    else if (argument === "--proxy-max-tokens-balanced") options.proxyTokenBudgets["sim-balanced"] = boundedPositiveInteger(requiredValue(argumentsList, ++index, argument), argument, 64, 8_192);
+    else if (argument === "--proxy-max-tokens-strong") options.proxyTokenBudgets["sim-strong"] = boundedPositiveInteger(requiredValue(argumentsList, ++index, argument), argument, 64, 8_192);
     else if (argument === "--proxy-model-small") options.proxyModels["sim-small"] = requiredValue(argumentsList, ++index, argument);
     else if (argument === "--proxy-model-balanced") options.proxyModels["sim-balanced"] = requiredValue(argumentsList, ++index, argument);
     else if (argument === "--proxy-model-strong") options.proxyModels["sim-strong"] = requiredValue(argumentsList, ++index, argument);

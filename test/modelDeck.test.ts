@@ -23,6 +23,24 @@ test("ModelDeck route snapshots retain only configured safe identities", async (
   }
 });
 
+test("ModelDeck readiness preflight waits for consecutive ready catalogue states", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  globalThis.fetch = (async () => {
+    requestCount++;
+    return new Response(JSON.stringify({ data: [{ id: "proxy", ready: requestCount > 1 }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
+    const readiness = await provider.waitForReadyModels(["proxy"], { timeoutMs: 1_000, pollIntervalMs: 1, consecutiveReadyChecks: 2 }, async () => undefined);
+    assert.deepEqual(readiness.modelIds, ["proxy"]);
+    assert.equal(readiness.consecutiveReadyChecks, 2);
+    assert.equal(requestCount, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("ModelDeck malformed responses are rejected", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => new Response(JSON.stringify({ data: [{ id: "local-router", ready: true }] }), { status: 200 })) as typeof fetch;
@@ -88,12 +106,12 @@ test("ModelDeck proxy candidates are restricted to declared contextual files and
       allowedFiles: ["test/routing.test.ts", "src/routing.ts"],
       context: [{ file: "test/routing.test.ts", content: "original" }],
       maxPatches: 1
-    });
+    }, 256);
     assert.deepEqual(candidate, {
       patches: [{ file: "test/routing.test.ts", search: "original", replacement: "updated" }],
       model: { publicModelId: "codex-router-proxy-strong", localModelId: "local/proxy", revision: "proxy-revision" }
     });
-    assert.equal(completionBody?.max_tokens, 2_048);
+    assert.equal(completionBody?.max_tokens, 256);
   } finally {
     globalThis.fetch = originalFetch;
   }

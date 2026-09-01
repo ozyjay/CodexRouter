@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { CodexModel } from "../src/contracts";
 import { EvaluationManifest, buildPrompt, classifyCodexFailure, roleAgentFiles, simulationPatchForProfile, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
-import { allocationsForRun, assertCapabilitySnapshot, capabilityRouteIdsFor, linkInstalledDependencies, readProxyContext, resolveEvaluationRef, runMutationCheck, runSimulation, strategiesForExecutionBackend } from "../scripts/baseline-eval";
+import { allocationsForRun, assertCapabilitySnapshot, capabilityRouteIdsFor, linkInstalledDependencies, proxyModelsForReadiness, readProxyContext, resolveEvaluationRef, runMutationCheck, runSimulation, strategiesForExecutionBackend } from "../scripts/baseline-eval";
 
 const manifest: EvaluationManifest = {
   version: 1,
@@ -177,6 +177,12 @@ test("proxy cohorts require unchanged capability route identities", async () => 
   };
   await assert.doesNotReject(assertCapabilitySnapshot({ snapshotRoutes: async () => snapshot }, routes, snapshot));
   await assert.rejects(assertCapabilitySnapshot({ snapshotRoutes: async () => ({ ...snapshot, strong: { ...snapshot.strong, revision: "2" } }) }, routes, snapshot), /routes changed/);
+});
+
+test("proxy readiness preflight targets declared expected tiers and otherwise all tiers", () => {
+  const proxyModels = { "sim-small": "small", "sim-balanced": "balanced", "sim-strong": "strong" };
+  assert.deepEqual(proxyModelsForReadiness([{ ...manifest.cases[0], expectedSimulationProfile: "sim-small" }], proxyModels), ["small"]);
+  assert.deepEqual(proxyModelsForReadiness([{ ...manifest.cases[0], expectedSimulationProfile: undefined }], proxyModels), ["small", "balanced", "strong"]);
 });
 
 test("evaluation references are resolved to an immutable commit before worktrees are created", async () => {

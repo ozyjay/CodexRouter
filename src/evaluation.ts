@@ -71,6 +71,9 @@ export interface ProxyRunMetadata {
   status: "applied" | "unavailable" | "invalid" | "inapplicable" | "context-error";
   rejectionReason?: "empty-response" | "invalid-json" | "invalid-contract";
   model?: { publicModelId: string; localModelId?: string; revision?: string };
+  maxTokens?: number;
+  readinessWaitMs?: number;
+  readinessChecks?: number;
   candidateDurationMs: number;
   patchCount?: number;
 }

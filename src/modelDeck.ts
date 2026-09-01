@@ -22,6 +22,12 @@ export interface ModelDeckRouteIdentity {
   revision?: string;
 }
 
+export interface ModelDeckReadinessPreflight {
+  modelIds: string[];
+  readyAfterMs: number;
+  consecutiveReadyChecks: number;
+}
+
 export interface SimulationSelectorInput {
   task: string;
   taskCategory: string;
@@ -77,6 +83,23 @@ export class ModelDeckProvider {
       snapshot[modelId] = { publicModelId: modelId, localModelId: model.modeldeck?.model_id, revision: model.revision };
     }
     return snapshot;
+  }
+
+  async waitForReadyModels(modelIds: readonly string[], options: { timeoutMs: number; pollIntervalMs: number; consecutiveReadyChecks: number }, pause: (milliseconds: number) => Promise<void> = wait): Promise<ModelDeckReadinessPreflight> {
+    const uniqueModelIds = [...new Set(modelIds)];
+    if (uniqueModelIds.length === 0) return { modelIds: [], readyAfterMs: 0, consecutiveReadyChecks: 0 };
+    const startedAt = Date.now();
+    let readyChecks = 0;
+    while (true) {
+      const readyModelIds = new Set((await this.discoverReadyModels()).map((model) => model.id));
+      readyChecks = uniqueModelIds.every((modelId) => readyModelIds.has(modelId)) ? readyChecks + 1 : 0;
+      if (readyChecks >= options.consecutiveReadyChecks) {
+        return { modelIds: uniqueModelIds, readyAfterMs: Date.now() - startedAt, consecutiveReadyChecks: readyChecks };
+      }
+      const remainingMs = options.timeoutMs - (Date.now() - startedAt);
+      if (remainingMs <= 0) throw new Error("ModelDeck proxy readiness preflight timed out.");
+      await pause(Math.min(options.pollIntervalMs, remainingMs));
+    }
   }
 
   async classify(input: RoutingInput): Promise<RoutingRecommendation> {
@@ -138,7 +161,7 @@ export class ModelDeckProvider {
     };
   }
 
-  async generateProxyCandidate(model: string, input: ProxyCandidateInput): Promise<ProxyCandidate> {
+  async generateProxyCandidate(model: string, input: ProxyCandidateInput, maxTokens = this.config.proxyMaxTokens ?? 2_048): Promise<ProxyCandidate> {
     if (!isValidProxyCandidateInput(input)) throw new Error("Invalid constrained proxy-candidate input.");
     const discovered = await this.discoverReadyModels();
     const selectedModel = discovered.find((candidate) => candidate.id === model);
@@ -150,7 +173,7 @@ export class ModelDeckProvider {
         model,
         stream: false,
         temperature: 0,
-        max_tokens: this.config.proxyMaxTokens ?? 2_048,
+        max_tokens: maxTokens,
         messages: [
           { role: "system", content: PROXY_CANDIDATE_PROMPT },
           { role: "user", content: JSON.stringify(input) }
@@ -186,6 +209,10 @@ export class ModelDeckProvider {
       clearTimeout(timeout);
     }
   }
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
 }
 
 export function assertLoopbackUrl(value: string): void {
