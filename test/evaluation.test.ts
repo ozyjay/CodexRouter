@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { CodexModel } from "../src/contracts";
 import { EvaluationManifest, buildPrompt, classifyCodexFailure, roleAgentFiles, simulationPatchForProfile, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
-import { allocationsForRun, linkInstalledDependencies, readProxyContext, resolveEvaluationRef, runMutationCheck, runSimulation, strategiesForExecutionBackend } from "../scripts/baseline-eval";
+import { allocationsForRun, assertCapabilitySnapshot, capabilityRouteIdsFor, linkInstalledDependencies, readProxyContext, resolveEvaluationRef, runMutationCheck, runSimulation, strategiesForExecutionBackend } from "../scripts/baseline-eval";
 
 const manifest: EvaluationManifest = {
   version: 1,
@@ -70,6 +70,12 @@ test("evaluation manifest accepts only safe, meaningful diff expectations", () =
   assert.deepEqual(validateEvaluationManifest(manifest), []);
   const invalid = { ...manifest, cases: [{ ...manifest.cases[0], expectation: { file: "../secret", requiredPatterns: [] }, mutation: { file: "src/routing.ts", search: "", replacement: "", validation: { command: "npm", args: [] } }, simulation: { file: "../secret", search: "", replacement: "" } }] };
   assert.match(validateEvaluationManifest(invalid).join(" "), /expectation.*mutation.*simulation/);
+});
+
+test("evaluation manifest accepts multiple safe diff expectations", () => {
+  const multiple = { ...manifest, cases: [{ ...manifest.cases[0], expectation: undefined, expectations: [{ file: "test/routing.test.ts", requiredPatterns: ["focused test"] }, { file: "README.md", requiredPatterns: ["evidence"] }] }] };
+  assert.deepEqual(validateEvaluationManifest(multiple), []);
+  assert.match(validateEvaluationManifest({ ...multiple, cases: [{ ...multiple.cases[0], expectations: [] }] }).join(" "), /expectations/);
 });
 
 test("evaluation manifest accepts bounded proxy constraints only", () => {
@@ -159,6 +165,18 @@ test("simulated runs do not attribute allocations to Codex models", () => {
 test("local proxy execution runs one distinct proxy-candidate strategy per iteration", () => {
   assert.deepEqual(strategiesForExecutionBackend("slm-proxy"), ["proxy-candidate"]);
   assert.deepEqual(strategiesForExecutionBackend("simulated"), ["single-model", "fixed-roles"]);
+});
+
+test("proxy cohorts require unchanged capability route identities", async () => {
+  const routes = capabilityRouteIdsFor({ selector: "modeldeck", modelDeckModel: "selector", proxyModels: { "sim-small": "small", "sim-balanced": "balanced", "sim-strong": "strong" } });
+  const snapshot = {
+    selector: { publicModelId: "selector", localModelId: "local/selector", revision: "1" },
+    small: { publicModelId: "small", localModelId: "local/small", revision: "1" },
+    balanced: { publicModelId: "balanced", localModelId: "local/balanced", revision: "1" },
+    strong: { publicModelId: "strong", localModelId: "local/strong", revision: "1" }
+  };
+  await assert.doesNotReject(assertCapabilitySnapshot({ snapshotRoutes: async () => snapshot }, routes, snapshot));
+  await assert.rejects(assertCapabilitySnapshot({ snapshotRoutes: async () => ({ ...snapshot, strong: { ...snapshot.strong, revision: "2" } }) }, routes, snapshot), /routes changed/);
 });
 
 test("evaluation references are resolved to an immutable commit before worktrees are created", async () => {

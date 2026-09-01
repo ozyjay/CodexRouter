@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { CodexAppServer, isChatGPTAuthentication } from "../src/appServer";
-import { ModelDeckProvider, ProxyCandidateError, SimulationSelectorRecommendation } from "../src/modelDeck";
+import { ModelDeckProvider, ModelDeckRouteIdentity, ProxyCandidateError, SimulationSelectorRecommendation } from "../src/modelDeck";
 import { EvaluationCase, EvaluationExecutionBackend, EvaluationManifest, EvaluationRunResult, EvaluationStrategy, ProxyCandidateConfig, ProxyRunMetadata, SimulationProfile, SimulationRunMetadata, SimulationScenario, buildPrompt, classifyCodexFailure, roleAgentFiles, simulationPatchForProfile, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
 
 type SimulationSelectorKind = "deterministic" | "modeldeck";
@@ -71,17 +71,21 @@ async function main(): Promise<void> {
   const proxyProvider = executionBackend === "slm-proxy"
     ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, timeoutMs: options.proxyTimeoutMs, proxyMaxTokens: options.proxyMaxTokens })
     : undefined;
+  const capabilityRouteIds = executionBackend === "slm-proxy" ? capabilityRouteIdsFor(options) : [];
+  const capabilitySnapshot = proxyProvider ? await proxyProvider.snapshotRoutes(capabilityRouteIds) : undefined;
   const strategies = strategiesForExecutionBackend(executionBackend);
   const runs: EvaluationRunResult[] = [];
   for (const evaluationCase of selectedCases) {
     for (let iteration = 1; iteration <= options.iterations; iteration++) {
       for (const strategy of strategies) {
+        if (proxyProvider && capabilitySnapshot) await assertCapabilitySnapshot(proxyProvider, capabilityRouteIds, capabilitySnapshot);
         runs.push(await runEvaluation(manifest, evaluationCase, strategy, resolvedRef, iteration, executionBackend, options.selector, modelDeck, proxyProvider, options.proxyModels));
+        if (proxyProvider && capabilitySnapshot) await assertCapabilitySnapshot(proxyProvider, capabilityRouteIds, capabilitySnapshot);
       }
     }
   }
   const report = {
-    version: 6,
+    version: 7,
     generatedAt: new Date().toISOString(),
     requestedRef: options.ref,
     ref: resolvedRef,
@@ -98,7 +102,8 @@ async function main(): Promise<void> {
       performanceAttribution: "local-proxy-only",
       selector: options.selector === "modeldeck" ? { kind: "modeldeck", publicModelId: options.modelDeckModel } : { kind: "deterministic" },
       proxyMaxTokens: options.proxyMaxTokens,
-      profileModels: options.proxyModels
+      profileModels: options.proxyModels,
+      capabilitySnapshot
     } : undefined,
     runs,
     summary: summariseEvaluationRuns(runs)
@@ -226,6 +231,20 @@ export function strategiesForExecutionBackend(executionBackend: EvaluationExecut
   return executionBackend === "slm-proxy" ? ["proxy-candidate"] : ["single-model", "fixed-roles"];
 }
 
+export function capabilityRouteIdsFor(options: Pick<Options, "selector" | "modelDeckModel" | "proxyModels">): string[] {
+  return [
+    ...(options.selector === "modeldeck" ? [options.modelDeckModel] : []),
+    options.proxyModels["sim-small"],
+    options.proxyModels["sim-balanced"],
+    options.proxyModels["sim-strong"]
+  ];
+}
+
+export async function assertCapabilitySnapshot(provider: Pick<ModelDeckProvider, "snapshotRoutes">, routeIds: readonly string[], expected: Record<string, ModelDeckRouteIdentity>): Promise<void> {
+  const actual = await provider.snapshotRoutes(routeIds);
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("ModelDeck capability routes changed during the evaluation cohort.");
+}
+
 function validateProxyCases(cases: readonly EvaluationCase[]): void {
   const missing = cases.filter((evaluationCase) => !evaluationCase.proxy).map((evaluationCase) => evaluationCase.id);
   if (missing.length > 0) throw new Error(`--slm-proxy requires proxy constraints for every selected case: ${missing.join(", ")}.`);
@@ -305,11 +324,15 @@ export async function linkInstalledDependencies(directory: string): Promise<void
 }
 
 async function matchesExpectation(directory: string, evaluationCase: EvaluationCase): Promise<boolean | null> {
-  if (!evaluationCase.expectation) return null;
-  const target = resolve(directory, evaluationCase.expectation.file);
-  if (relative(directory, target).startsWith("..")) return false;
-  const diff = await runCapture("git", ["-C", directory, "diff", "--", evaluationCase.expectation.file]);
-  return evaluationCase.expectation.requiredPatterns.every((pattern) => diff.includes(pattern));
+  const expectations = evaluationCase.expectations ?? (evaluationCase.expectation ? [evaluationCase.expectation] : []);
+  if (expectations.length === 0) return null;
+  for (const expectation of expectations) {
+    const target = resolve(directory, expectation.file);
+    if (relative(directory, target).startsWith("..")) return false;
+    const diff = await runCapture("git", ["-C", directory, "diff", "--", expectation.file]);
+    if (!expectation.requiredPatterns.every((pattern) => diff.includes(pattern))) return false;
+  }
+  return true;
 }
 
 export async function runMutationCheck(directory: string, evaluationCase: EvaluationCase): Promise<boolean | null> {

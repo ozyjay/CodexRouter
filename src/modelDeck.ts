@@ -16,6 +16,12 @@ interface ModelDeckModel {
   modeldeck?: { model_id?: string };
 }
 
+export interface ModelDeckRouteIdentity {
+  publicModelId: string;
+  localModelId?: string;
+  revision?: string;
+}
+
 export interface SimulationSelectorInput {
   task: string;
   taskCategory: string;
@@ -58,6 +64,19 @@ export class ModelDeckProvider {
 
   async discoverModels(): Promise<string[]> {
     return (await this.discoverReadyModels()).map((model) => model.id);
+  }
+
+  async snapshotRoutes(modelIds: readonly string[]): Promise<Record<string, ModelDeckRouteIdentity>> {
+    const response = await this.request("models", { method: "GET" });
+    const payload = await response.json() as { data?: ModelDeckModel[] };
+    if (!Array.isArray(payload.data)) throw new Error("ModelDeck returned an invalid /models response.");
+    const snapshot: Record<string, ModelDeckRouteIdentity> = {};
+    for (const modelId of [...new Set(modelIds)]) {
+      const model = payload.data.find((candidate) => candidate.id === modelId);
+      if (!model) throw new Error(`ModelDeck did not report configured route ${modelId}.`);
+      snapshot[modelId] = { publicModelId: modelId, localModelId: model.modeldeck?.model_id, revision: model.revision };
+    }
+    return snapshot;
   }
 
   async classify(input: RoutingInput): Promise<RoutingRecommendation> {

@@ -80,6 +80,7 @@ export interface EvaluationCase {
   prompt: string;
   validation: ValidationCommand;
   expectation?: DiffExpectation;
+  expectations?: DiffExpectation[];
   mutation?: MutationCheck;
   simulation?: SimulationScenario;
   simulationProfiles?: Partial<Record<SimulationProfile, SimulationScenario>>;
@@ -154,6 +155,7 @@ export function validateEvaluationManifest(value: unknown): string[] {
     if (typeof candidate.prompt !== "string" || candidate.prompt.trim().length === 0) errors.push(`cases[${index}] must have a task prompt.`);
     if (!isValidationCommand(candidate.validation)) errors.push(`cases[${index}] must have an executable validation command and argument array.`);
     if (candidate.expectation !== undefined && !isDiffExpectation(candidate.expectation)) errors.push(`cases[${index}] expectation must name a relative file and at least one required pattern.`);
+    if (candidate.expectations !== undefined && (!Array.isArray(candidate.expectations) || candidate.expectations.length === 0 || !candidate.expectations.every(isDiffExpectation))) errors.push(`cases[${index}] expectations must contain one or more safe diff expectations.`);
     if (candidate.mutation !== undefined && !isMutationCheck(candidate.mutation)) errors.push(`cases[${index}] mutation must name a relative file, a non-empty search string, a replacement, and a validation command.`);
     if (candidate.simulation !== undefined && !isSimulationScenario(candidate.simulation)) errors.push(`cases[${index}] simulation must name one or more safe deterministic patches.`);
     if (candidate.simulationProfiles !== undefined && !isSimulationProfiles(candidate.simulationProfiles)) errors.push(`cases[${index}] simulationProfiles must map recognised simulation profiles to safe deterministic patches.`);

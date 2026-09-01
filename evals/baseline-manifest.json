@@ -80,7 +80,7 @@
     },
     {
       "id": "focused-evaluation-doc",
-      "prompt": "In README.md, add one concise sentence immediately before the Current limitations heading that explains selector calibration uses expected simulation tiers. Do not change code or other documentation. Run npm run check.",
+      "prompt": "In README.md, add the sentence \"Selector calibration uses expected simulation tiers.\" immediately before the Current limitations heading. Change only README.md.",
       "validation": {
         "command": "npm",
         "args": ["run", "check"]
@@ -96,23 +96,37 @@
         "search": "\n## Current limitations and next steps",
         "replacement": "\nSelector calibration uses expected simulation tiers.\n\n## Current limitations and next steps"
       },
-      "expectedSimulationProfile": "sim-small"
+      "expectedSimulationProfile": "sim-small",
+      "proxy": {
+        "allowedFiles": ["README.md"],
+        "contextFiles": ["README.md"],
+        "maxPatches": 1,
+        "maxContextChars": 16000
+      }
     },
     {
       "id": "bounded-tier-helper-test",
-      "prompt": "Update the baseline evaluation documentation and test coverage together. In test/evaluation.test.ts, add exactly one test named \"simulation profiles preserve an explicitly selected tier\". It must call simulationPatchForProfile with a sim-balanced declared patch and assert that sim-balanced is retained. In evals/README.md, add one concise sentence explaining that a balanced simulation scenario can modify multiple declared files. Do not change production files. Run npm run check.",
+      "prompt": "Make exactly two changes. In test/evaluation.test.ts, add one test named \"simulation profiles preserve an explicitly selected tier\" that calls simulationPatchForProfile with a sim-balanced declared patch and asserts the selected profile is sim-balanced. In evals/README.md, add the sentence \"A balanced simulation scenario can modify multiple declared files.\" Change only those two files.",
       "validation": {
         "command": "npm",
         "args": ["run", "check"]
       },
-      "expectation": {
-        "file": "test/evaluation.test.ts",
-        "requiredPatterns": [
-          "simulation profiles preserve an explicitly selected tier",
-          "sim-balanced",
-          "simulationPatchForProfile"
-        ]
-      },
+      "expectations": [
+        {
+          "file": "test/evaluation.test.ts",
+          "requiredPatterns": [
+            "simulation profiles preserve an explicitly selected tier",
+            "sim-balanced",
+            "simulationPatchForProfile"
+          ]
+        },
+        {
+          "file": "evals/README.md",
+          "requiredPatterns": [
+            "A balanced simulation scenario can modify multiple declared files."
+          ]
+        }
+      ],
       "simulation": {
         "patches": [
           {
@@ -128,7 +142,13 @@
         ]
       },
       "expectedSimulationProfile": "sim-balanced",
-      "estimatedFilesAffected": 2
+      "estimatedFilesAffected": 2,
+      "proxy": {
+        "allowedFiles": ["test/evaluation.test.ts", "evals/README.md"],
+        "contextFiles": ["test/evaluation.test.ts", "evals/README.md"],
+        "maxPatches": 2,
+        "maxContextChars": 24000
+      }
     }
   ]
 }
