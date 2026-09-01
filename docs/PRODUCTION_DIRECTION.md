@@ -6,6 +6,20 @@ Build Codex Router as an independent VS Code extension with its own focused rout
 
 The production experience should make routing intentional and inspectable before a Codex turn begins, while leaving the established Codex extension free to handle ordinary direct conversations.
 
+## Current implementation status
+
+The evidence-first command milestone is implemented before the sidebar:
+
+- commands and `@router` share one routing-session controller;
+- routing and execution context are separate and previewed;
+- deterministic routing is the default policy;
+- ModelDeck is explicitly opt-in and experimental;
+- ordinal recommendation strength replaces user-facing percentage confidence;
+- App Server catalogue validation, approval-request handling, terminal states, and supported turn interruption are implemented against the inspected schema, with a live smoke test still pending;
+- privacy-safe outcomes distinguish turn state from user-observed task results and can be exported or deleted.
+
+The dedicated secondary-sidebar view remains the next product UI stage. It must consume the existing session controller rather than introduce another routing flow.
+
 ## Product position
 
 Codex Router is not another general coding agent. It is a local decision layer and launchpad for Codex:
@@ -27,7 +41,7 @@ Create one **Codex Router** view in the VS Code secondary sidebar. It should be 
 | State | Content | Main action |
 | --- | --- | --- |
 | Ready | Task composer, active file/selection toggles, service health summary | Analyse task |
-| Recommendation | Model, effort, confidence, concise reasons, source, escalation signals | Use recommendation / Override |
+| Recommendation | Model, effort, strength, concise reasons, source, context summaries, fallback and escalation signals | Use recommendation / Override |
 | Running | Selected model and effort, Codex progress, streamed response, normal approval status | Open output / Cancel if supported |
 | Completed | Final response summary, elapsed time, optional validation/rating capture | New routed task |
 | Recovery | Clear problem and safe recovery instructions | Recheck App Server / Open settings |
@@ -39,7 +53,7 @@ The composer should include task text plus opt-in chips for the active file, sel
 The recommendation card is the centre of the product. It must show:
 
 - selected Codex model and effort;
-- confidence and whether the result came from ModelDeck or deterministic fallback;
+- ordinal recommendation strength and whether the result came from the deterministic baseline or a named experimental classifier;
 - no more than three concise reasons;
 - relevant escalation signals;
 - a model/effort override that is constrained to App Server-discovered choices;
@@ -60,8 +74,8 @@ Selecting **Use recommendation** starts a new App Server thread. Selecting **Ove
 VS Code extension host
   ├─ Router panel controller and native commands
   ├─ Routing service
-  │   ├─ ModelDeck provider (loopback only)
-  │   ├─ deterministic policy and guardrails
+  │   ├─ deterministic policy and guardrails (default)
+  │   ├─ optional ModelDeck provider (loopback only)
   │   └─ recommendation validation
   ├─ Codex App Server client (child process, stdio JSON-RPC)
   ├─ local outcome store and evaluation exporter
@@ -88,16 +102,16 @@ Before relying on it, validate the exact active ModelDeck profile, model ID, `re
 
 ## Delivery stages
 
-### Stage 1 — reliable vertical slice
+### Stage 1 — reliable command vertical slice (implemented; live smoke pending)
 
 - Fix extension activation and diagnostics.
 - Keep command-based flow working independently of Chat.
 - Verify real App Server model discovery, ChatGPT auth validation, first turn, streaming, and cleanup with an explicit manual smoke test.
-- Configure and smoke-test the dedicated ModelDeck capability.
+- Keep ModelDeck disabled by default and smoke-test the dedicated capability only when explicitly enabled.
 
 **Exit criterion:** an explicit task can be routed, approved/overridden, sent through Codex App Server, and completed with visible recovery states.
 
-### Stage 2 — production router panel
+### Stage 2 — production router panel (next)
 
 - Add the secondary-sidebar router panel.
 - Implement stateful composer, visible sent-context preview, recommendation card, constrained overrides, and streamed transcript.
@@ -108,8 +122,8 @@ Before relying on it, validate the exact active ModelDeck profile, model ID, `re
 
 ### Stage 3 — outcome evidence and evaluation
 
-- Record opt-in privacy-safe outcomes, including explicit validation and user ratings.
-- Add local export and comparison reports for fixed baselines, router choices, and user overrides.
+- Extend the implemented opt-in privacy-safe outcome records and basic Markdown export with richer evaluation views.
+- Compare fixed baselines, router choices, and user overrides without mixing subjective telemetry with matched live evidence.
 - Integrate optional identifiers that allow manual correlation with Codex Local Meter without reading its private extension state.
 
 **Exit criterion:** representative tasks can be compared on verification rate, repair turns, elapsed time, override rate, under-routing, and over-routing.
@@ -125,7 +139,7 @@ Before relying on it, validate the exact active ModelDeck profile, model ID, `re
 ## Reliability and security requirements
 
 - Start App Server with `codex app-server --stdio`, argument arrays, and no network listener.
-- Call `getAuthStatus` with token inclusion disabled and accept only supported ChatGPT authentication.
+- Call the version-matched `account/read` interface without requesting token material and accept only supported ChatGPT authentication.
 - Discover every model and effort from the live App Server catalogue at session start; refresh after reconnection.
 - Use timeouts, request IDs, cancellation, malformed-message handling, and child-process cleanup.
 - Do not store source code, complete task prompts, final answers, credentials, or raw protocol traffic in analytics.

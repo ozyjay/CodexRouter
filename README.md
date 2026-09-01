@@ -1,6 +1,6 @@
 # Codex Router
 
-Codex Router is a local VS Code companion that recommends a Codex model and reasoning effort before submitting a task through the local Codex App Server. It is a proof of concept for adaptive task routing using ChatGPT-authenticated Codex and a local ModelDeck classifier.
+Codex Router is a local VS Code companion that recommends a Codex model and reasoning effort before submitting a task through the local Codex App Server. Its default is a transparent deterministic policy; an opt-in local ModelDeck classifier is available as an experimental policy.
 
 It does not use the OpenAI Platform API, request an API key, or read `~/.codex/auth.json`. Codex App Server runs locally, but Codex model turns consume the user’s ChatGPT Codex allowance when authenticated through ChatGPT. This project does not require or use OpenAI Platform API credits in ChatGPT-only mode.
 
@@ -8,13 +8,15 @@ It does not use the OpenAI Platform API, request an API key, or read `~/.codex/a
 
 - `@router` VS Code chat participant, when the host exposes the public Chat Participant API.
 - `Codex Router: New Routed Task` command and selected-code context-menu fallback.
+- One routing-session controller shared by commands and `@router`.
 - Runtime model and reasoning-effort discovery through Codex App Server `model/list`.
-- Safe authentication validation through `getAuthStatus` with `includeToken: false`.
+- Safe authentication validation through App Server `account/read` without requesting tokens.
 - Local ModelDeck discovery (`GET /v1/models`) and structured classification (`POST /v1/chat/completions`).
-- Strict local validation, deterministic fallback, and security/scope guardrails.
+- Deterministic routing by default, strict local-classifier validation, and safety guardrails.
+- Separate routing metadata and user-approved Codex execution context.
 - Explicit **Use recommendation** or **Override** selection before any Codex turn begins.
-- App Server stdio lifecycle handling and streamed assistant-message output.
-- Optional, local-only privacy-preserving outcome records.
+- App Server stdio lifecycle handling, native approval prompts, streamed assistant output, and supported `turn/interrupt` cancellation.
+- Optional, local-only privacy-preserving outcome records with Markdown export and deletion commands.
 
 ## Architecture and trust boundaries
 
@@ -22,7 +24,7 @@ It does not use the OpenAI Platform API, request an API key, or read `~/.codex/a
 VS Code task / @router
         |
         v
-local ModelDeck classifier ---- unavailable/malformed ----> deterministic guardrails
+deterministic policy (default) <---- safety baseline ---- optional ModelDeck policy
         |                                                   |
         +---------------- recommendation ------------------+
                                                             v
@@ -35,7 +37,9 @@ local ModelDeck classifier ---- unavailable/malformed ----> deterministic guardr
                                             ChatGPT-authenticated Codex turn
 ```
 
-Only the task, explicitly selected file information, language identifier, and compact workspace metadata are supplied to the local router. No repository-wide content is sent by default. Router analytics never store task text, source code, generated answers, App Server protocol messages, or credentials.
+The router normally receives only the task. Active-file language and relative-name metadata are opt-in. The selected-code command supplies only selection metadata to routing; the source excerpt is withheld from the classifier and included in the Codex execution prompt after the user accepts or overrides the recommendation. No repository-wide content is sent by default.
+
+Router analytics never store task text, source code, selected excerpts, filenames, workspace names, generated answers, App Server protocol messages, or credentials.
 
 The extension spawns `codex app-server --stdio`; it does not expose a listening service. ModelDeck URLs are rejected unless their host is the literal loopback address `127.0.0.1` or `::1`.
 
@@ -70,11 +74,13 @@ Open this folder in VS Code and press `F5` to start an Extension Development Hos
 
 1. Run **Codex Router: New Routed Task**, or type `@router` in VS Code Chat.
 2. Enter a task.
-3. Review the recommended model, effort, confidence, and rationale.
+3. Review the recommended model, effort, recommendation strength, source, limited-context summary, and rationale.
 4. Select **Use recommendation** or **Override**.
 5. Approve Codex actions through its normal approval and sandbox flow.
 
-Use **Codex Router: Send Selection to Codex Router** from an editor selection to make that selected excerpt available to the local classifier and submitted task.
+While a turn is running, select the Codex Router status item or run **Codex Router: Cancel Active Turn** to request App Server `turn/interrupt`.
+
+Use **Codex Router: Send Selection to Codex Router** from an editor selection to send only selection metadata to routing and make the excerpt available to the executing Codex turn after approval.
 
 ### Debugging
 
@@ -86,16 +92,17 @@ If something does not start, run **Codex Router: Show Diagnostics** from the Com
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
+| `codexRouter.routing.provider` | `deterministic` | Selects the transparent baseline or the opt-in `modeldeck-experimental` policy. |
 | `codexRouter.modelDeck.baseUrl` | `http://127.0.0.1:8600/v1` | Local ModelDeck OpenAI-compatible endpoint. |
 | `codexRouter.modelDeck.routerModel` | empty | Optional local routing model ID. Empty chooses the first ready model advertised by ModelDeck. |
-| `codexRouter.requestTimeoutMs` | `15000` | Local router timeout. |
+| `codexRouter.requestTimeoutMs` | `5000` | Experimental local-classifier timeout. |
 | `codexRouter.analytics.enabled` | `false` | Enables local outcome records. |
 
-If ModelDeck cannot be reached, returns malformed JSON, has no ready model, or is configured with a non-loopback URL, Codex Router labels the decision internally as deterministic fallback and does not contact a cloud routing model.
+ModelDeck is not contacted under the default policy. When explicitly enabled, an unavailable, timed-out, malformed, non-loopback, or unsupported classifier result falls back visibly to the deterministic policy without a cloud-routing request.
 
 ## Routing policy
 
-The local classifier proposes a JSON recommendation. Codex Router validates that recommendation against the live App Server catalogue, including each model’s supported reasoning efforts. The classifier cannot choose unsupported models or efforts.
+The deterministic policy assesses scope, ambiguity, exploration, architectural judgement, reversibility, blast radius, verification burden, consequential risk, and whether work is bounded and repeatable. Recommendations use ordinal `weak`, `moderate`, or `strong` strength; these labels describe policy clarity, not a calibrated probability.
 
 The deterministic policy starts with:
 
@@ -103,11 +110,15 @@ The deterministic policy starts with:
 - Terra / medium for ordinary implementation, tests, documentation, and debugging.
 - Sol / high for security-sensitive, destructive, migration, concurrent/distributed, ambiguous, or broad architectural work.
 
-Guardrails take precedence over local-model advice. A user can override every recommendation. The router only changes model or effort when starting a new turn; it does not interrupt an active turn to change settings.
+Every result is mapped to the live App Server catalogue. Missing tiers prefer the nearest stronger recognised tier before a weaker tier; unsupported efforts prefer the nearest stronger recognised effort. Unrecognised catalogues use the advertised default. Every substitution is disclosed. Safety guardrails take precedence over experimental local-model advice.
+
+A user can override every recommendation using only live, visible model/effort combinations. The router changes allocation only before a new turn starts.
 
 ## Privacy and local records
 
-When `codexRouter.analytics.enabled` is enabled, `outcomes.ndjson` is stored beneath VS Code’s extension global storage. Each record has an anonymous, one-way workspace identifier plus routing metadata such as selected model/effort, duration, completion state, and optional later validation state. It deliberately excludes task text, paths, source code, model output, and credentials.
+When `codexRouter.analytics.enabled` is enabled, versioned `outcomes.ndjson` records are stored beneath VS Code’s extension global storage. Turn state is separate from user-reported task completion and build/test evidence: a completed Codex turn is not automatically a successful software task.
+
+Run **Codex Router: Export Outcome Report** to choose a Markdown destination. Reports show sample size, missing outcomes, overrides, verified completion, repair turns, elapsed time per verified completion, and user-reported under- or over-routing. Groups with fewer than 20 observed outcomes or five verified completions are marked too small for a policy change. Run **Codex Router: Clear Local Outcome Records** to delete the local store after confirmation.
 
 Codex Local Meter remains the preferred source for observing ChatGPT Codex usage. Codex Router does not read or depend on another extension’s private state.
 
@@ -140,16 +151,17 @@ This starts a real Codex turn and consumes the user’s ChatGPT Codex allowance:
 1. Confirm `codex login status` reports ChatGPT authentication.
 2. Start an Extension Development Host with `F5`.
 3. Run **Codex Router: New Routed Task** with a harmless task such as “Add a comment to the README and report the change”.
-4. Confirm ModelDeck routing or deterministic fallback is shown, select a configuration, and verify streamed output and ordinary Codex approvals.
-5. Confirm the status item reports the selected model and effort. If analytics was enabled, inspect only the metadata record in VS Code global storage.
+4. Confirm deterministic routing is shown, select a configuration, and verify streamed output, ordinary Codex approvals, and cancellation with a harmless long-running task if appropriate.
+5. Optionally enable `modeldeck-experimental` and confirm its identity or visible deterministic fallback.
+6. Confirm the status item reports the selected model and effort. If analytics was enabled, inspect only the metadata record and exported report.
 
 ## Current limitations and next steps
 
-- Real App Server and ModelDeck smoke testing must be performed outside this build sandbox; the sandbox cannot open the local ModelDeck socket or initialise Codex’s writable runtime state.
-- The initial evaluation store supports router-versus-fixed strategy exports conceptually but does not yet ship a visual evaluation report.
-- Validation/test outcomes and repair-turn counts are designed into the record contract, but are not yet automatically inferred from Codex output.
+- The installed `codex-cli 0.150.1` schema was inspected for `account/read`, `model/list`, `turn/start`, `turn/interrupt`, terminal turn states, and approval requests. A real turn still requires the explicit manual smoke test above because it consumes ChatGPT allowance.
+- The primary sidebar panel is the next UI milestone. Commands and `@router` currently use the shared routing-session controller.
+- Build/test outcomes and repair-turn counts are deliberately user-reported rather than inferred from model output.
 - The `@router` entry point depends on the host enabling VS Code’s public Chat Participant API. The command entry point is always available.
 
-Future work should add an evaluation view/export, user success ratings, observed build/test results, and an opt-in contextual-bandit policy trained only from the local metadata contract.
+Future work should add the sidebar panel and representative matched live evaluations. Automatic adaptation remains research-only until reproducible evidence supports it.
 
 For the proposed independent-extension UX, production architecture, staged delivery plan, and non-goals, see [Production direction](docs/PRODUCTION_DIRECTION.md). For the phase-aware orchestration baseline and adaptive-routing evaluation design, see [Adaptive orchestration proposal](docs/ADAPTIVE_ORCHESTRATION_PROPOSAL.md).

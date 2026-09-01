@@ -1,6 +1,6 @@
-import { RoutingInput, RoutingRecommendation } from "./contracts";
+import { MODELDECK_POLICY_VERSION, ProviderFallback, RoutingInput, RoutingRecommendation } from "./contracts";
 import { SimulationProfile } from "./evaluation";
-import { isValidRecommendation } from "./routing";
+import { fallbackRoute, isValidRecommendation } from "./routing";
 
 export interface ModelDeckConfig {
   baseUrl: string;
@@ -107,6 +107,8 @@ export class ModelDeckProvider {
     const discovered = await this.discoverReadyModels();
     const model = this.config.routerModel || discovered[0]?.id;
     if (!model) throw new Error("ModelDeck did not report a ready local routing model.");
+    const selectedModel = discovered.find((candidate) => candidate.id === model);
+    if (!selectedModel) throw new Error("The configured ModelDeck routing model is not ready.");
 
     const response = await this.request("chat/completions", {
       method: "POST",
@@ -115,9 +117,10 @@ export class ModelDeckProvider {
         model,
         stream: false,
         temperature: 0,
+        max_tokens: 512,
         messages: [
           { role: "system", content: ROUTER_PROMPT },
-          { role: "user", content: JSON.stringify({ task: input.task, languageId: input.languageId, selectedFileName: input.selectedFileName, workspaceName: input.workspaceName }) }
+          { role: "user", content: JSON.stringify(input) }
         ]
       })
     });
@@ -125,9 +128,18 @@ export class ModelDeckProvider {
     const content = payload.choices?.[0]?.message?.content;
     if (typeof content !== "string") throw new Error("ModelDeck returned no chat-completion content.");
 
-    const candidate = parseJsonObject(content);
+    let candidate: unknown;
+    try { candidate = parseJsonObject(content); } catch { throw new Error("ModelDeck returned malformed routing JSON."); }
     if (!isValidRecommendation(candidate)) throw new Error("ModelDeck returned an invalid routing recommendation.");
-    return { ...candidate, source: "local-model" };
+    const baseline = fallbackRoute(input);
+    return {
+      ...candidate,
+      source: "local-model",
+      strength: baseline.strength,
+      policyVersion: MODELDECK_POLICY_VERSION,
+      assessment: baseline.assessment,
+      classifierModel: modelDeckRouteIdentity(model, selectedModel).publicModelId
+    };
   }
 
   async selectSimulationProfile(input: SimulationSelectorInput): Promise<SimulationSelectorRecommendation> {
@@ -206,10 +218,22 @@ export class ModelDeckProvider {
       const response = await fetch(`${this.config.baseUrl.replace(/\/$/, "")}/${path}`, { ...init, signal: controller.signal });
       if (!response.ok) throw new Error(`ModelDeck request failed with HTTP ${response.status}.`);
       return response;
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("ModelDeck request timed out.");
+      throw error;
     } finally {
       clearTimeout(timeout);
     }
   }
+}
+
+export function classifyModelDeckFailure(error: unknown): ProviderFallback {
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (message.includes("timed out")) return "timeout";
+  if (message.includes("no ready") || message.includes("not ready") || message.includes("a ready local routing model")) return "no-ready-model";
+  if (message.includes("invalid") || message.includes("malformed") || message.includes("json") || message.includes("content")) return "malformed";
+  if (message.includes("unsupported") || message.includes("unavailable model")) return "unsupported-allocation";
+  return "unavailable";
 }
 
 function wait(milliseconds: number): Promise<void> {

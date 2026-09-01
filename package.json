@@ -25,6 +25,21 @@
         "command": "codexRouter.showDiagnostics",
         "title": "Show Diagnostics",
         "category": "Codex Router"
+      },
+      {
+        "command": "codexRouter.cancelActiveTurn",
+        "title": "Cancel Active Turn",
+        "category": "Codex Router"
+      },
+      {
+        "command": "codexRouter.exportOutcomes",
+        "title": "Export Outcome Report",
+        "category": "Codex Router"
+      },
+      {
+        "command": "codexRouter.clearOutcomes",
+        "title": "Clear Local Outcome Records",
+        "category": "Codex Router"
       }
     ],
     "menus": {
@@ -48,6 +63,16 @@
     "configuration": {
       "title": "Codex Router",
       "properties": {
+        "codexRouter.routing.provider": {
+          "type": "string",
+          "enum": ["deterministic", "modeldeck-experimental"],
+          "enumDescriptions": [
+            "Use the transparent deterministic routing baseline without contacting ModelDeck.",
+            "Use an experimental loopback ModelDeck classifier with deterministic safety guardrails."
+          ],
+          "default": "deterministic",
+          "description": "Routing policy. ModelDeck classification is experimental and explicitly opt-in."
+        },
         "codexRouter.modelDeck.baseUrl": {
           "type": "string",
           "default": "http://127.0.0.1:8600/v1",
@@ -60,9 +85,9 @@
         },
         "codexRouter.requestTimeoutMs": {
           "type": "number",
-          "default": 15000,
-          "minimum": 1000,
-          "maximum": 120000,
+          "default": 5000,
+          "minimum": 500,
+          "maximum": 30000,
           "description": "Maximum time to wait for a local routing-model response."
         },
         "codexRouter.analytics.enabled": {
@@ -87,6 +112,5 @@
     "@types/vscode": "^1.134.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3"
-  },
-  "codexRouter.modelDeck.routerModel": "codex-router-classifier"
+  }
 }

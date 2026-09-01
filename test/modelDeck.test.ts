@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl } from "../src/modelDeck";
+import { ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl, classifyModelDeckFailure } from "../src/modelDeck";
 
 test("ModelDeck provider rejects non-loopback endpoints", () => {
   assert.throws(() => assertLoopbackUrl("https://example.com/v1"), /loopback/);
@@ -47,6 +47,46 @@ test("ModelDeck malformed responses are rejected", async () => {
   try {
     const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
     await assert.rejects(provider.classify({ task: "Add a test." }), /no chat-completion content/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ModelDeck classifier receives metadata but never execution source", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  let requestBody = "";
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestCount++;
+    if (requestCount === 2 && typeof init?.body === "string") requestBody = init.body;
+    return new Response(JSON.stringify(requestCount === 1
+      ? { data: [{ id: "local-router", ready: true, revision: "revision-1" }] }
+      : { choices: [{ message: { content: "{\"taskType\":\"testing\",\"scope\":\"narrow\",\"complexity\":\"low\",\"risk\":\"normal\",\"ambiguity\":\"low\",\"recommendedModel\":\"gpt-5.6-luna\",\"recommendedEffort\":\"low\",\"confidence\":0.8,\"reasons\":[\"Bounded test change.\"],\"escalationSignals\":[]}" } }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
+    const recommendation = await provider.classify({ task: "Add one test.", metadata: { languageId: "typescript", selectionPresent: true, selectedCharacters: 42 } });
+    assert.equal(recommendation.classifierModel, "local-router");
+    assert.equal(recommendation.source, "local-model");
+    assert.match(requestBody, /selectedCharacters/);
+    assert.doesNotMatch(requestBody, /secret source excerpt/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ModelDeck unavailable, no-ready-model and timeout failures are classified safely", async () => {
+  assert.equal(classifyModelDeckFailure(new Error("connection refused")), "unavailable");
+  assert.equal(classifyModelDeckFailure(new Error("ModelDeck did not report a ready local routing model.")), "no-ready-model");
+  assert.equal(classifyModelDeckFailure(new Error("ModelDeck request timed out.")), "timeout");
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+  })) as typeof fetch;
+  try {
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 5 });
+    await assert.rejects(provider.classify({ task: "Add one test." }), /timed out/);
   } finally {
     globalThis.fetch = originalFetch;
   }
