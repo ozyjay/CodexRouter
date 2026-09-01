@@ -29,6 +29,7 @@ Codex Router is a local, privacy-preserving VS Code companion. It recommends a C
 ## Engineering standards
 
 - Use TypeScript with strict compilation and maintain small modules with explicit contracts.
+- Use PowerShell (`pwsh -NoProfile`) as the primary interface for project operations, automation, and documented commands. Package tasks are routed through `scripts/invoke.ps1`; use Bash only for an explicitly documented platform-specific exception.
 - Spawn child processes with argument arrays and `shell: false`. Clean up child processes when the extension deactivates.
 - Validate every local-model result before using it. Reject malformed JSON, out-of-range confidence values, long rationales, unknown model IDs, and unsupported efforts.
 - Maintain fake transports for App Server and ModelDeck tests. Normal tests must not invoke a real Codex turn or consume ChatGPT allowance.
@@ -38,7 +39,7 @@ Codex Router is a local, privacy-preserving VS Code companion. It recommends a C
 
 Before handing off a change, run:
 
-```bash
+```powershell
 npm run check
 ```
 

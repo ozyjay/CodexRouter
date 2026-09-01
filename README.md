@@ -45,13 +45,13 @@ The extension spawns `codex app-server --stdio`; it does not expose a listening 
 - Node.js 22 or later for development.
 - Codex CLI installed and authenticated with ChatGPT:
 
-  ```bash
+  ```powershell
   codex login status
   ```
 
   If this does not show ChatGPT authentication, run:
 
-  ```bash
+  ```powershell
   codex logout
   codex login
   codex login status
@@ -61,7 +61,7 @@ The extension spawns `codex app-server --stdio`; it does not expose a listening 
 
 ## Install and run in VS Code
 
-```bash
+```powershell
 npm install
 npm run compile
 ```
@@ -113,13 +113,15 @@ Codex Local Meter remains the preferred source for observing ChatGPT Codex usage
 
 ## Development and verification
 
+Use PowerShell as the primary project shell. Package tasks invoke `pwsh -NoProfile` through `scripts/invoke.ps1`.
+
 ```powershell
 npm run compile
 npm run test
 npm run check
 ```
 
-The package scripts invoke `pwsh -NoProfile` through `scripts/invoke.ps1`. The test suite uses fake App Server and ModelDeck transports; it makes no Codex model turns and consumes no ChatGPT allowance.
+The test suite uses fake App Server and ModelDeck transports; it makes no Codex model turns and consumes no ChatGPT allowance.
 
 ### Fixed-role baseline evaluation
 

@@ -6,6 +6,8 @@ The manifest contains the evaluation prompts and therefore must be treated separ
 
 ## Configure
 
+Run these commands from PowerShell. The package scripts invoke `pwsh -NoProfile` through `scripts/invoke.ps1`; Bash syntax is not the primary supported operator interface.
+
 Update `baseline-manifest.json` with representative cases and the model/effort combinations available from the live Codex App Server catalogue. Each validation command is an executable plus an argument array; shell strings, redirects, and pipelines are intentionally unsupported.
 
 ## Dry run
