@@ -109,6 +109,8 @@ If something does not start, run **Codex Router: Show Diagnostics** from the Com
 
 The sidebar’s **Routing mode** setting controls the same `codexRouter.routing.provider` preference. **Codex deterministic routing** is the default. **ModelDeck experimental classifier** sends only the documented compact routing input to the configured loopback ModelDeck endpoint; Codex still executes the approved task in both modes.
 
+During a streamed Codex response, the sidebar displays an estimated `tok/s` rate. It is calculated locally from generated-text length and elapsed streaming time; it is not an App Server usage measurement.
+
 ModelDeck classification is not contacted under the default policy. The proxy command contacts ModelDeck only after its separate disclosure confirmation, regardless of the routing-provider setting. An unavailable, timed-out, malformed, non-loopback, out-of-scope, or inapplicable proxy result fails closed; it is never applied and never replaced with a generated fallback. An experimental classifier failure instead falls back visibly to the deterministic policy without a cloud-routing request.
 
 ## Routing policy
