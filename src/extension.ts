@@ -13,10 +13,12 @@ let activeSession: RoutingSessionController | undefined;
 let statusItem: vscode.StatusBarItem;
 let output: vscode.OutputChannel;
 let resultProvider: RouterResultProvider;
+let sidebarProvider: RouterSidebarProvider;
 
 export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel("Codex Router");
   resultProvider = new RouterResultProvider();
+  sidebarProvider = new RouterSidebarProvider(context);
   output.appendLine("Codex Router activated.");
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   setStatus("checking");
@@ -26,6 +28,7 @@ export function activate(context: vscode.ExtensionContext): void {
     output,
     statusItem,
     resultProvider,
+    vscode.window.registerWebviewViewProvider(RouterSidebarProvider.viewType, sidebarProvider),
     vscode.workspace.registerTextDocumentContentProvider(RouterResultProvider.scheme, resultProvider),
     vscode.workspace.onDidCloseTextDocument((document) => {
       if (document.uri.scheme === RouterResultProvider.scheme) resultProvider.remove(document.uri);
@@ -237,7 +240,7 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
     const recommendation = await session.analyse(status.models);
     session.awaitApproval();
     sink.text(formatRecommendation(recommendation, summaries.routing, summaries.execution));
-    const choice = await chooseConfiguration(session, recommendation, status.models);
+    const choice = await (sink.chooseConfiguration ?? chooseConfiguration)(session, recommendation, status.models);
     if (!choice) return;
 
     sink.progress(`Starting Codex with ${choice.model} / ${choice.effort}…`);
@@ -264,6 +267,7 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
   } finally {
     cancellationDisposable?.dispose();
     if (activeSession === session) activeSession = undefined;
+    sink.finish?.();
   }
 }
 
@@ -513,6 +517,8 @@ interface StreamSink {
   progress: (message: string) => void;
   text: (message: string) => void;
   onCancellationRequested?: (listener: () => void) => vscode.Disposable;
+  chooseConfiguration?: (session: RoutingSessionController, recommendation: RoutingRecommendation, models: CodexModel[]) => Promise<AllocationSelection | undefined>;
+  finish?: () => void;
 }
 
 function notificationSink(): StreamSink {
@@ -553,4 +559,112 @@ class RouterResultProvider implements vscode.TextDocumentContentProvider {
     this.contents.clear();
     this.changed.dispose();
   }
+}
+
+class RouterSidebarProvider implements vscode.WebviewViewProvider {
+  static readonly viewType = "codexRouter.sidebar";
+  private view?: vscode.WebviewView;
+  private pendingSelection?: { resolve: (selection: AllocationSelection | undefined) => void; session: RoutingSessionController; models: CodexModel[] };
+  private inFlight = false;
+
+  constructor(private readonly context: vscode.ExtensionContext) {}
+
+  resolveWebviewView(view: vscode.WebviewView): void {
+    this.view = view;
+    view.webview.options = { enableScripts: true };
+    view.webview.html = sidebarHtml(view.webview);
+    view.webview.onDidReceiveMessage((message: unknown) => { void this.handleMessage(message); }, undefined, this.context.subscriptions);
+    view.onDidDispose(() => {
+      this.pendingSelection?.resolve(undefined);
+      this.pendingSelection = undefined;
+      this.view = undefined;
+    }, undefined, this.context.subscriptions);
+  }
+
+  private async handleMessage(message: unknown): Promise<void> {
+    if (!isSidebarMessage(message)) return;
+    if (message.type === "cancel") {
+      cancelActiveTurn();
+      return;
+    }
+    if (message.type === "submit") {
+      const task = message.task.trim();
+      if (!task || this.inFlight) return;
+      const active = vscode.window.activeTextEditor;
+      const metadata = message.includeMetadata && active ? {
+        languageId: active.document.languageId,
+        relativeFileName: vscode.workspace.asRelativePath(active.document.uri),
+        workspaceFolderCount: vscode.workspace.workspaceFolders?.length
+      } : undefined;
+      this.inFlight = true;
+      this.post({ type: "started" });
+      await routeAndRun(this.context, sessionInput(task, metadata), this.sink());
+      return;
+    }
+    if (message.type === "selection" && this.pendingSelection) {
+      const pending = this.pendingSelection;
+      this.pendingSelection = undefined;
+      try {
+        const selection = message.useRecommendation
+          ? pending.session.acceptRecommendation()
+          : pending.session.override(message.model, message.effort, pending.models);
+        pending.resolve(selection);
+      } catch (error) {
+        this.post({ type: "error", message: error instanceof Error ? error.message : "Invalid model selection." });
+        this.pendingSelection = pending;
+      }
+    }
+  }
+
+  private sink(): StreamSink {
+    return {
+      progress: (message) => this.post({ type: "progress", message }),
+      text: (message) => this.post({ type: "output", message }),
+      chooseConfiguration: (session, recommendation, models) => new Promise((resolve) => {
+        this.pendingSelection = { resolve, session, models };
+        this.post({
+          type: "recommendation",
+          recommendation: {
+            model: recommendation.recommendedModel,
+            effort: recommendation.recommendedEffort,
+            strength: recommendation.strength,
+            reasons: recommendation.reasons
+          },
+          models: models.filter((model) => !model.hidden).map((model) => ({
+            model: model.model,
+            displayName: model.displayName,
+            efforts: model.supportedReasoningEfforts.map(({ reasoningEffort }) => reasoningEffort)
+          }))
+        });
+      }),
+      finish: () => {
+        this.inFlight = false;
+        this.post({ type: "finished" });
+      }
+    };
+  }
+
+  private post(message: unknown): void {
+    void this.view?.webview.postMessage(message);
+  }
+}
+
+function isSidebarMessage(value: unknown): value is { type: "submit"; task: string; includeMetadata: boolean } | { type: "cancel" } | { type: "selection"; useRecommendation: boolean; model: string; effort: string } {
+  if (!value || typeof value !== "object" || !("type" in value)) return false;
+  const message = value as Record<string, unknown>;
+  if (message.type === "cancel") return true;
+  if (message.type === "submit") return typeof message.task === "string" && typeof message.includeMetadata === "boolean";
+  return message.type === "selection" && typeof message.useRecommendation === "boolean" && typeof message.model === "string" && typeof message.effort === "string";
+}
+
+function sidebarHtml(webview: vscode.Webview): string {
+  const nonce = randomUUID();
+  const csp = `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';`;
+  return `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);padding:0 10px}textarea,select,button{box-sizing:border-box;width:100%;font:inherit;margin-top:8px}textarea,select{color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border);padding:6px}textarea{min-height:100px;resize:vertical}button{padding:7px;border:0;color:var(--vscode-button-foreground);background:var(--vscode-button-background)}button:hover{background:var(--vscode-button-hoverBackground)}button.secondary{color:var(--vscode-button-secondaryForeground);background:var(--vscode-button-secondaryBackground)}label{display:block;margin-top:10px}.muted{color:var(--vscode-descriptionForeground);font-size:12px}#recommendation,#output,#cancel{display:none}#output{white-space:pre-wrap;overflow-wrap:anywhere;border-top:1px solid var(--vscode-panel-border);margin-top:14px;padding-top:10px;font-family:var(--vscode-editor-font-family);font-size:12px}.card{border:1px solid var(--vscode-panel-border);padding:10px;margin-top:14px}</style>
+</head><body><h3>Codex Router</h3><p class="muted">Route a task using your ChatGPT-authenticated Codex catalogue.</p>
+<label for="task">Task</label><textarea id="task" placeholder="Describe the coding task"></textarea><label><input id="metadata" type="checkbox"> Include active-file metadata</label><p class="muted">Language and relative filename only — never source code.</p><button id="route">Get recommendation</button><button id="cancel" class="secondary">Cancel active turn</button>
+<section id="recommendation" class="card"><strong id="allocation"></strong><p id="reasons" class="muted"></p><button id="accept">Use recommendation</button><label for="model">Override model</label><select id="model"></select><label for="effort">Reasoning effort</label><select id="effort"></select><button id="override" class="secondary">Use override</button></section><div id="output" aria-live="polite"></div>
+<script nonce="${nonce}">const vscode=acquireVsCodeApi(),task=document.getElementById('task'),metadata=document.getElementById('metadata'),route=document.getElementById('route'),cancel=document.getElementById('cancel'),recommendation=document.getElementById('recommendation'),output=document.getElementById('output'),model=document.getElementById('model'),effort=document.getElementById('effort');let models=[];function post(value){vscode.postMessage(value)}function setBusy(busy){route.disabled=busy;cancel.style.display=busy?'block':'none'}function updateEfforts(){const selected=models.find(entry=>entry.model===model.value);effort.replaceChildren(...(selected?.efforts??[]).map(value=>{const option=document.createElement('option');option.value=value;option.textContent=value;return option}))}route.addEventListener('click',()=>post({type:'submit',task:task.value,includeMetadata:metadata.checked}));cancel.addEventListener('click',()=>post({type:'cancel'}));model.addEventListener('change',updateEfforts);document.getElementById('accept').addEventListener('click',()=>post({type:'selection',useRecommendation:true,model:'',effort:''}));document.getElementById('override').addEventListener('click',()=>post({type:'selection',useRecommendation:false,model:model.value,effort:effort.value}));window.addEventListener('message',event=>{const message=event.data;if(message.type==='started'){setBusy(true);recommendation.style.display='none';output.style.display='block';output.textContent=''}if(message.type==='progress'){output.style.display='block';output.textContent+=message.message+'\\n'}if(message.type==='output'){output.style.display='block';output.textContent+=message.message}if(message.type==='error'){output.style.display='block';output.textContent+=message.message+'\\n'}if(message.type==='recommendation'){models=message.models;document.getElementById('allocation').textContent=message.recommendation.model+' / '+message.recommendation.effort;document.getElementById('reasons').textContent=message.recommendation.reasons.join(' ');model.replaceChildren(...models.map(entry=>{const option=document.createElement('option');option.value=entry.model;option.textContent=entry.displayName+' ('+entry.model+')';return option}));model.value=message.recommendation.model;updateEfforts();effort.value=message.recommendation.effort;recommendation.style.display='block'}if(message.type==='finished'){setBusy(false);recommendation.style.display='none'}});</script></body></html>`;
 }

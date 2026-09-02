@@ -61,6 +61,25 @@
         }
       ]
     },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codexRouter",
+          "title": "Codex Router",
+          "icon": "media/codex-router.svg"
+        }
+      ]
+    },
+    "views": {
+      "codexRouter": [
+        {
+          "id": "codexRouter.sidebar",
+          "name": "Codex Router",
+          "type": "webview",
+          "contextualTitle": "Route a Codex task"
+        }
+      ]
+    },
     "chatParticipants": [
       {
         "id": "codex-router.router",

@@ -8,7 +8,7 @@ The production experience should make routing intentional and inspectable before
 
 ## Current implementation status
 
-The evidence-first command milestone is implemented before the sidebar:
+The evidence-first command milestone is implemented and is now complemented by the router sidebar:
 
 - commands and `@router` share one routing-session controller;
 - routing and execution context are separate and previewed;
@@ -19,7 +19,7 @@ The evidence-first command milestone is implemented before the sidebar:
 - App Server catalogue validation, approval-request handling, terminal states, and supported turn interruption are implemented against the inspected schema, with a live smoke test still pending;
 - privacy-safe outcomes distinguish turn state from user-observed task results and can be exported or deleted.
 
-The dedicated secondary-sidebar view remains the next product UI stage. It must consume the existing session controller rather than introduce another routing flow.
+The dedicated Activity Bar sidebar consumes the existing session controller rather than introducing another routing flow.
 
 ## Product position
 
@@ -37,7 +37,7 @@ The next-level research direction is documented separately in [Adaptive orchestr
 
 ## Primary UX
 
-Create one **Codex Router** view in the VS Code secondary sidebar. It should be narrow enough to sit beside the editor and usable without VS Code Chat or the Codex extension being open.
+Create one **Codex Router** view in its own VS Code Activity Bar sidebar. It should be narrow enough to sit beside the editor and usable without VS Code Chat or the Codex extension being open.
 
 ### Router panel states
 
@@ -127,9 +127,9 @@ Before relying on it, validate the exact active ModelDeck profile, model ID, `re
 
 **Exit criterion:** an explicit task can be routed, approved/overridden, sent through Codex App Server, and completed with visible recovery states.
 
-### Stage 2 — production router panel (next)
+### Stage 2 — production router panel (implemented; live smoke pending)
 
-- Add the secondary-sidebar router panel.
+- Add the Activity Bar router panel.
 - Implement stateful composer, visible sent-context preview, recommendation card, constrained overrides, and streamed transcript.
 - Add accessible keyboard interaction and theme testing.
 - Retain commands and `@router` as alternative entry points into the same service.
