@@ -14,8 +14,9 @@ Codex Router is a local, privacy-preserving VS Code companion. It recommends a C
 
 - Router inference must stay local. ModelDeck endpoints must use literal loopback addresses (`127.0.0.1` or `::1`); do not add cloud fallback.
 - Send the router only the user task, explicitly selected content, and compact metadata required for classification. Never send the complete workspace by default.
-- Never log complete task prompts, repository content, generated model output, raw App Server protocol messages, or credentials.
-- Outcome records are opt-in. Store only the documented privacy-safe metadata and retain the one-way workspace identifier; do not add source paths or task text.
+- By default, diagnostics may contain only privacy-safe categories and operational metadata. Do not log complete task prompts, repository content, generated model output, raw App Server protocol messages, or credentials.
+- The sole diagnostic exception is a rejected local ModelDeck classifier response when the user has explicitly enabled `codexRouter.diagnostics.logRawClassifierResponses`. Keep it in the local output channel only, clearly label it as sensitive, and never persist, export, forward, or otherwise reuse it.
+- Outcome records are opt-in. Store only the documented privacy-safe metadata and the one-way workspace identifier; do not add source paths, task text, generated output, or raw protocol data.
 - Preserve Codex approval and sandbox behaviour. Do not weaken safety controls to improve the apparent success rate.
 
 ## UX direction
@@ -49,16 +50,16 @@ Run a real Codex App Server/ModelDeck smoke test only when the user explicitly o
 
 This repository owns project-scoped developer skills in [`.codex/skills`](.codex/skills). They are aids for developing Codex Router, not extension features. Do not copy, synchronise, or install them into `~/.codex/skills` or another global Codex directory.
 
-When native workspace-skill discovery is unavailable, select the matching skill below and read its `SKILL.md` before starting the task:
+Use the matching skill below before starting work in its stated scope. If native workspace-skill discovery is unavailable, read the linked `SKILL.md` directly.
 
 | Skill | Use for |
 |---|---|
-| `codex-router-extension-workflow` | Commands, `@router`, sidebar, sessions, activation, and cross-cutting extension changes. |
-| `codex-router-app-server` | App Server protocol, catalogue, authentication, streaming, approvals, cancellation, and lifecycle work. |
-| `codex-router-local-routing` | Deterministic routing, ModelDeck classifier/proxy behaviour, validation, and guardrails. |
-| `codex-router-evaluation` | Evaluation manifests, simulation, proxy cohorts, worktrees, and reports. |
-| `codex-router-panel-ui` | Sidebar/webview UX, accessibility, theme support, and recovery states. |
-| `codex-router-privacy-review` | Explicit privacy or security reviews involving data disclosure, persistence, diagnostics, or deletion. |
+| [`codex-router-extension-workflow`](.codex/skills/codex-router-extension-workflow/SKILL.md) | Commands, `@router`, sidebar, sessions, activation, and cross-cutting extension changes. |
+| [`codex-router-app-server`](.codex/skills/codex-router-app-server/SKILL.md) | App Server protocol, catalogue, authentication, streaming, approvals, cancellation, and lifecycle work. |
+| [`codex-router-local-routing`](.codex/skills/codex-router-local-routing/SKILL.md) | Deterministic routing, ModelDeck classifier/proxy behaviour, validation, and guardrails. |
+| [`codex-router-evaluation`](.codex/skills/codex-router-evaluation/SKILL.md) | Evaluation manifests, simulation, proxy cohorts, worktrees, and reports. |
+| [`codex-router-panel-ui`](.codex/skills/codex-router-panel-ui/SKILL.md) | Sidebar/webview UX, accessibility, theme support, and recovery states. |
+| [`codex-router-privacy-review`](.codex/skills/codex-router-privacy-review/SKILL.md) | Explicit privacy or security reviews involving data disclosure, persistence, diagnostics, or deletion. |
 
 ## Documentation
 
