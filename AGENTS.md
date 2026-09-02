@@ -52,14 +52,12 @@ This repository owns project-scoped developer skills in [`.codex/skills`](.codex
 
 Use the matching skill below before starting work in its stated scope. If native workspace-skill discovery is unavailable, read the linked `SKILL.md` directly.
 
-| Skill | Use for |
-|---|---|
-| [`codex-router-extension-workflow`](.codex/skills/codex-router-extension-workflow/SKILL.md) | Commands, `@router`, sidebar, sessions, activation, and cross-cutting extension changes. |
-| [`codex-router-app-server`](.codex/skills/codex-router-app-server/SKILL.md) | App Server protocol, catalogue, authentication, streaming, approvals, cancellation, and lifecycle work. |
-| [`codex-router-local-routing`](.codex/skills/codex-router-local-routing/SKILL.md) | Deterministic routing, ModelDeck classifier/proxy behaviour, validation, and guardrails. |
-| [`codex-router-evaluation`](.codex/skills/codex-router-evaluation/SKILL.md) | Evaluation manifests, simulation, proxy cohorts, worktrees, and reports. |
-| [`codex-router-panel-ui`](.codex/skills/codex-router-panel-ui/SKILL.md) | Sidebar/webview UX, accessibility, theme support, and recovery states. |
-| [`codex-router-privacy-review`](.codex/skills/codex-router-privacy-review/SKILL.md) | Explicit privacy or security reviews involving data disclosure, persistence, diagnostics, or deletion. |
+- [`codex-router-extension-workflow`](.codex/skills/codex-router-extension-workflow/SKILL.md): commands, `@router`, sidebar, sessions, activation, and cross-cutting extension changes.
+- [`codex-router-app-server`](.codex/skills/codex-router-app-server/SKILL.md): App Server protocol, catalogue, authentication, streaming, approvals, cancellation, and lifecycle work.
+- [`codex-router-local-routing`](.codex/skills/codex-router-local-routing/SKILL.md): deterministic routing, ModelDeck classifier/proxy behaviour, validation, and guardrails.
+- [`codex-router-evaluation`](.codex/skills/codex-router-evaluation/SKILL.md): evaluation manifests, simulation, proxy cohorts, worktrees, and reports.
+- [`codex-router-panel-ui`](.codex/skills/codex-router-panel-ui/SKILL.md): sidebar/webview UX, accessibility, theme support, and recovery states.
+- [`codex-router-privacy-review`](.codex/skills/codex-router-privacy-review/SKILL.md): explicit privacy or security reviews involving data disclosure, persistence, diagnostics, or deletion.
 
 ## Documentation
 
