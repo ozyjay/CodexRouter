@@ -64,6 +64,15 @@ export class ProxyCandidateError extends Error {
   }
 }
 
+/** A privacy-safe classifier rejection detail suitable for the extension output channel. */
+export class ModelDeckClassifierError extends Error {
+  public constructor(public readonly diagnostic: "no-completion-content" | "json-parse-failed" | "contract-validation-failed") {
+    super(diagnostic === "no-completion-content"
+      ? "ModelDeck returned no chat-completion content."
+      : `ModelDeck classifier response rejected: ${diagnostic}.`);
+  }
+}
+
 export class ModelDeckProvider {
   public constructor(private readonly config: ModelDeckConfig) {
     assertLoopbackUrl(config.baseUrl);
@@ -128,11 +137,14 @@ export class ModelDeckProvider {
     });
     const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
     const content = payload.choices?.[0]?.message?.content;
-    if (typeof content !== "string") throw new Error("ModelDeck returned no chat-completion content.");
+    if (typeof content !== "string") throw new ModelDeckClassifierError("no-completion-content");
 
     let candidate: unknown;
-    try { candidate = parseJsonObject(content); } catch { throw new Error("ModelDeck returned malformed routing JSON."); }
-    if (!isValidRecommendation(candidate)) throw new Error("ModelDeck returned an invalid routing recommendation.");
+    try { candidate = parseClassifierJson(content); } catch (error) {
+      if (error instanceof ModelDeckClassifierError) throw error;
+      throw new ModelDeckClassifierError("json-parse-failed");
+    }
+    if (!isValidRecommendation(candidate)) throw new ModelDeckClassifierError("contract-validation-failed");
     const baseline = fallbackRoute(input);
     return {
       ...candidate,
@@ -232,12 +244,17 @@ export class ModelDeckProvider {
 }
 
 export function classifyModelDeckFailure(error: unknown): ProviderFallback {
+  if (error instanceof ModelDeckClassifierError) return "malformed";
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (message.includes("timed out")) return "timeout";
   if (message.includes("no ready") || message.includes("not ready") || message.includes("a ready local routing model")) return "no-ready-model";
   if (message.includes("invalid") || message.includes("malformed") || message.includes("json") || message.includes("content")) return "malformed";
   if (message.includes("unsupported") || message.includes("unavailable model")) return "unsupported-allocation";
   return "unavailable";
+}
+
+export function modelDeckFailureDiagnostic(error: unknown): string | undefined {
+  return error instanceof ModelDeckClassifierError ? error.diagnostic : undefined;
 }
 
 function wait(milliseconds: number): Promise<void> {
@@ -273,6 +290,12 @@ export function assertModelDeckModelId(value: string): void {
 function parseJsonObject(content: string): unknown {
   const fenced = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)?.[1] ?? content;
   return JSON.parse(fenced.trim());
+}
+
+function parseClassifierJson(content: string): unknown {
+  // Some local models emit an otherwise-valid JSON answer after a thinking preamble.
+  // Strip only that wrapper; neither the response nor task content is logged.
+  return parseJsonObject(content.replace(/^\s*<think>[\s\S]*?<\/think>\s*/i, ""));
 }
 
 function parseProxyCandidateJson(content: string): unknown {

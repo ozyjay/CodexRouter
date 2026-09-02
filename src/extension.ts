@@ -281,7 +281,7 @@ async function route(input: RoutingInput, models: CodexModel[]): Promise<Routing
       baseUrl: configuration.get<string>("modelDeck.baseUrl", "http://127.0.0.1:8600/v1"),
       routerModel: configuration.get<string>("modelDeck.routerModel", "") || undefined,
       timeoutMs: configuration.get<number>("requestTimeoutMs", 5_000)
-    }), (fallback) => output.appendLine(`[router fallback] ${fallback}`));
+    }), (fallback, diagnostic) => output.appendLine(`[router fallback] ${fallback}${diagnostic ? ` (${diagnostic})` : ""}`));
 }
 
 async function chooseConfiguration(session: RoutingSessionController, recommendation: RoutingRecommendation, models: CodexModel[]): Promise<AllocationSelection | undefined> {

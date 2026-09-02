@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl, assertModelDeckModelId, classifyModelDeckFailure } from "../src/modelDeck";
+import { ModelDeckClassifierError, ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl, assertModelDeckModelId, classifyModelDeckFailure, modelDeckFailureDiagnostic } from "../src/modelDeck";
 
 test("ModelDeck provider rejects non-loopback endpoints", () => {
   assert.throws(() => assertLoopbackUrl("https://example.com/v1"), /loopback/);
@@ -55,6 +55,30 @@ test("ModelDeck malformed responses are rejected", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("ModelDeck classifier tolerates a thinking preamble without recording it", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestCount = 0;
+  globalThis.fetch = (async () => {
+    requestCount++;
+    return new Response(JSON.stringify(requestCount === 1
+      ? { data: [{ id: "local-router", ready: true }] }
+      : { choices: [{ message: { content: "<think>Classify the task.</think>\n{\"taskType\":\"testing\",\"scope\":\"narrow\",\"complexity\":\"low\",\"risk\":\"normal\",\"ambiguity\":\"low\",\"recommendedModel\":\"gpt-5.6-luna\",\"recommendedEffort\":\"low\",\"confidence\":0.8,\"reasons\":[\"Bounded test change.\"],\"escalationSignals\":[]}" } }] }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
+    const recommendation = await provider.classify({ task: "Add one test." });
+    assert.equal(recommendation.source, "local-model");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("ModelDeck classifier exposes a safe malformed-response diagnostic", () => {
+  const error = new ModelDeckClassifierError("contract-validation-failed");
+  assert.equal(classifyModelDeckFailure(error), "malformed");
+  assert.equal(modelDeckFailureDiagnostic(error), "contract-validation-failed");
 });
 
 test("ModelDeck classifier receives metadata but never execution source", async () => {

@@ -111,7 +111,7 @@ The sidebar’s **Recommendation source** selector controls the same `codexRoute
 
 During a streamed Codex response, the sidebar displays an estimated `tok/s` rate. It is calculated locally from generated-text length and elapsed streaming time; it is not an App Server usage measurement.
 
-ModelDeck classification is not contacted under the default policy. The proxy command contacts ModelDeck only after its separate disclosure confirmation, regardless of the routing-provider setting. An unavailable, timed-out, malformed, non-loopback, out-of-scope, or inapplicable proxy result fails closed; it is never applied and never replaced with a generated fallback. An experimental classifier failure instead falls back visibly to the deterministic policy without a cloud-routing request.
+ModelDeck classification is not contacted under the default policy. The proxy command contacts ModelDeck only after its separate disclosure confirmation, regardless of the routing-provider setting. An unavailable, timed-out, malformed, non-loopback, out-of-scope, or inapplicable proxy result fails closed; it is never applied and never replaced with a generated fallback. An experimental classifier failure instead falls back visibly to the deterministic policy without a cloud-routing request. For classifier failures, the Codex Router output channel records a privacy-safe rejection category (for example, JSON parsing or contract validation) but never the task or raw model response.
 
 ## Routing policy
 
