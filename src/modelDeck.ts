@@ -66,7 +66,11 @@ export class ProxyCandidateError extends Error {
 
 /** A privacy-safe classifier rejection detail suitable for the extension output channel. */
 export class ModelDeckClassifierError extends Error {
-  public constructor(public readonly diagnostic: "no-completion-content" | "json-parse-failed" | "contract-validation-failed") {
+  public constructor(
+    public readonly diagnostic: "no-completion-content" | "json-parse-failed" | "contract-validation-failed",
+    /** Retained only until an explicitly enabled local diagnostic sink handles the error. */
+    public readonly rawResponse?: string
+  ) {
     super(diagnostic === "no-completion-content"
       ? "ModelDeck returned no chat-completion content."
       : `ModelDeck classifier response rejected: ${diagnostic}.`);
@@ -142,9 +146,9 @@ export class ModelDeckProvider {
     let candidate: unknown;
     try { candidate = parseClassifierJson(content); } catch (error) {
       if (error instanceof ModelDeckClassifierError) throw error;
-      throw new ModelDeckClassifierError("json-parse-failed");
+      throw new ModelDeckClassifierError("json-parse-failed", content);
     }
-    if (!isValidRecommendation(candidate)) throw new ModelDeckClassifierError("contract-validation-failed");
+    if (!isValidRecommendation(candidate)) throw new ModelDeckClassifierError("contract-validation-failed", content);
     const baseline = fallbackRoute(input);
     return {
       ...candidate,
@@ -255,6 +259,10 @@ export function classifyModelDeckFailure(error: unknown): ProviderFallback {
 
 export function modelDeckFailureDiagnostic(error: unknown): string | undefined {
   return error instanceof ModelDeckClassifierError ? error.diagnostic : undefined;
+}
+
+export function modelDeckRawFailureResponse(error: unknown): string | undefined {
+  return error instanceof ModelDeckClassifierError ? error.rawResponse : undefined;
 }
 
 function wait(milliseconds: number): Promise<void> {

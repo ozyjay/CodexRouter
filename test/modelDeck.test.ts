@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ModelDeckClassifierError, ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl, assertModelDeckModelId, classifyModelDeckFailure, modelDeckFailureDiagnostic } from "../src/modelDeck";
+import { ModelDeckClassifierError, ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl, assertModelDeckModelId, classifyModelDeckFailure, modelDeckFailureDiagnostic, modelDeckRawFailureResponse } from "../src/modelDeck";
 
 test("ModelDeck provider rejects non-loopback endpoints", () => {
   assert.throws(() => assertLoopbackUrl("https://example.com/v1"), /loopback/);
@@ -76,9 +76,10 @@ test("ModelDeck classifier tolerates a thinking preamble without recording it", 
 });
 
 test("ModelDeck classifier exposes a safe malformed-response diagnostic", () => {
-  const error = new ModelDeckClassifierError("contract-validation-failed");
+  const error = new ModelDeckClassifierError("contract-validation-failed", "{\"unexpected\":true}");
   assert.equal(classifyModelDeckFailure(error), "malformed");
   assert.equal(modelDeckFailureDiagnostic(error), "contract-validation-failed");
+  assert.equal(modelDeckRawFailureResponse(error), "{\"unexpected\":true}");
 });
 
 test("ModelDeck classifier receives metadata but never execution source", async () => {

@@ -277,11 +277,19 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
 async function route(input: RoutingInput, models: CodexModel[]): Promise<RoutingRecommendation> {
   const configuration = vscode.workspace.getConfiguration("codexRouter");
   const provider = configuration.get<RoutingProvider>("routing.provider", "deterministic");
+  const logRawClassifierResponses = configuration.get<boolean>("diagnostics.logRawClassifierResponses", false);
   return recommendWithProvider(input, models, provider, () => new ModelDeckProvider({
       baseUrl: configuration.get<string>("modelDeck.baseUrl", "http://127.0.0.1:8600/v1"),
       routerModel: configuration.get<string>("modelDeck.routerModel", "") || undefined,
       timeoutMs: configuration.get<number>("requestTimeoutMs", 5_000)
-    }), (fallback, diagnostic) => output.appendLine(`[router fallback] ${fallback}${diagnostic ? ` (${diagnostic})` : ""}`));
+    }), (fallback, diagnostic, rawResponse) => {
+      output.appendLine(`[router fallback] ${fallback}${diagnostic ? ` (${diagnostic})` : ""}`);
+      if (logRawClassifierResponses && rawResponse !== undefined) {
+        output.appendLine("[router classifier raw response — sensitive diagnostic output]");
+        output.appendLine(rawResponse);
+        output.appendLine("[end router classifier raw response]");
+      }
+    });
 }
 
 async function chooseConfiguration(session: RoutingSessionController, recommendation: RoutingRecommendation, models: CodexModel[]): Promise<AllocationSelection | undefined> {

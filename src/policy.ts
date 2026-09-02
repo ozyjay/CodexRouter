@@ -1,5 +1,5 @@
 import { CodexModel, RoutingInput, RoutingProvider, RoutingRecommendation } from "./contracts";
-import { classifyModelDeckFailure, modelDeckFailureDiagnostic } from "./modelDeck";
+import { classifyModelDeckFailure, modelDeckFailureDiagnostic, modelDeckRawFailureResponse } from "./modelDeck";
 import { applyGuardrails, deterministicRoute } from "./routing";
 
 export interface ExperimentalRoutingClassifier {
@@ -11,7 +11,7 @@ export async function recommendWithProvider(
   models: CodexModel[],
   provider: RoutingProvider,
   createClassifier: () => ExperimentalRoutingClassifier,
-  onFallback?: (category: string, diagnostic?: string) => void
+  onFallback?: (category: string, diagnostic?: string, rawResponse?: string) => void
 ): Promise<RoutingRecommendation> {
   const baseline = deterministicRoute(input, models);
   if (provider === "deterministic") return baseline;
@@ -21,7 +21,7 @@ export async function recommendWithProvider(
     return applyGuardrails(localRecommendation, input, models);
   } catch (error) {
     const fallback = classifyModelDeckFailure(error);
-    onFallback?.(fallback, modelDeckFailureDiagnostic(error));
+    onFallback?.(fallback, modelDeckFailureDiagnostic(error), modelDeckRawFailureResponse(error));
     return { ...baseline, providerFallback: fallback };
   }
 }

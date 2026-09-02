@@ -138,6 +138,11 @@
           "maximum": 30000,
           "description": "Maximum time to wait for a local routing-model response."
         },
+        "codexRouter.diagnostics.logRawClassifierResponses": {
+          "type": "boolean",
+          "default": false,
+          "description": "Debug only: write rejected local-classifier responses to the Codex Router output channel. Responses may contain sensitive task content."
+        },
         "codexRouter.analytics.enabled": {
           "type": "boolean",
           "default": false,

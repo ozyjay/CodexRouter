@@ -105,13 +105,14 @@ If something does not start, run **Codex Router: Show Diagnostics** from the Com
 | `codexRouter.modelDeck.proxyTimeoutMs` | `120000` | Timeout for an explicitly requested local proxy candidate. |
 | `codexRouter.modelDeck.proxyMaxTokens` | `2048` | Maximum local proxy-candidate output budget. |
 | `codexRouter.requestTimeoutMs` | `5000` | Experimental local-classifier timeout. |
+| `codexRouter.diagnostics.logRawClassifierResponses` | `false` | Debug only: writes rejected local-classifier responses to the local Codex Router output channel. Responses may contain sensitive task content. |
 | `codexRouter.analytics.enabled` | `false` | Enables local outcome records. |
 
 The sidebar’s **Recommendation source** selector controls the same `codexRouter.routing.provider` preference. **Deterministic policy** is the default. **Local SLM** sends only the documented compact routing input to the configured loopback ModelDeck endpoint; Codex still executes the approved task in both modes. The Local SLM is experimental: an unavailable, malformed, or unsafe result visibly falls back to the deterministic policy.
 
 During a streamed Codex response, the sidebar displays an estimated `tok/s` rate. It is calculated locally from generated-text length and elapsed streaming time; it is not an App Server usage measurement.
 
-ModelDeck classification is not contacted under the default policy. The proxy command contacts ModelDeck only after its separate disclosure confirmation, regardless of the routing-provider setting. An unavailable, timed-out, malformed, non-loopback, out-of-scope, or inapplicable proxy result fails closed; it is never applied and never replaced with a generated fallback. An experimental classifier failure instead falls back visibly to the deterministic policy without a cloud-routing request. For classifier failures, the Codex Router output channel records a privacy-safe rejection category (for example, JSON parsing or contract validation) but never the task or raw model response.
+ModelDeck classification is not contacted under the default policy. The proxy command contacts ModelDeck only after its separate disclosure confirmation, regardless of the routing-provider setting. An unavailable, timed-out, malformed, non-loopback, out-of-scope, or inapplicable proxy result fails closed; it is never applied and never replaced with a generated fallback. An experimental classifier failure instead falls back visibly to the deterministic policy without a cloud-routing request. For classifier failures, the Codex Router output channel records a privacy-safe rejection category (for example, JSON parsing or contract validation). To inspect the full rejected response during local debugging, explicitly enable `codexRouter.diagnostics.logRawClassifierResponses`; it is disabled by default because the response may contain sensitive task content.
 
 ## Routing policy
 
