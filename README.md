@@ -107,7 +107,7 @@ If something does not start, run **Codex Router: Show Diagnostics** from the Com
 | `codexRouter.requestTimeoutMs` | `5000` | Experimental local-classifier timeout. |
 | `codexRouter.analytics.enabled` | `false` | Enables local outcome records. |
 
-The sidebar’s **Routing mode** setting controls the same `codexRouter.routing.provider` preference. **Codex deterministic routing** is the default. **ModelDeck experimental classifier** sends only the documented compact routing input to the configured loopback ModelDeck endpoint; Codex still executes the approved task in both modes.
+The sidebar’s **Recommendation source** selector controls the same `codexRouter.routing.provider` preference. **Deterministic policy** is the default. **Local SLM** sends only the documented compact routing input to the configured loopback ModelDeck endpoint; Codex still executes the approved task in both modes. The Local SLM is experimental: an unavailable, malformed, or unsafe result visibly falls back to the deterministic policy.
 
 During a streamed Codex response, the sidebar displays an estimated `tok/s` rate. It is calculated locally from generated-text length and elapsed streaming time; it is not an App Server usage measurement.
 
