@@ -636,7 +636,7 @@ class RouterSidebarProvider implements vscode.WebviewViewProvider {
           : pending.session.override(message.model, message.effort, pending.models);
         pending.resolve(selection);
       } catch (error) {
-        this.post({ type: "selection-invalid", message: error instanceof Error ? error.message : "Invalid model selection." });
+        this.post({ type: "error", message: error instanceof Error ? error.message : "Invalid model selection." });
         this.pendingSelection = pending;
       }
     }
