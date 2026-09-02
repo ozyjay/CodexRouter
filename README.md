@@ -6,7 +6,7 @@ It does not use the OpenAI Platform API, request an API key, or read `~/.codex/a
 
 ## What is implemented
 
-- Dedicated **Codex Router** Activity Bar sidebar with task composer, context disclosure, recommendation approval/override, and streamed result.
+- Dedicated **Codex Router** Activity Bar conversation with task composer, context disclosure, recommendation approval/override, and streamed result.
 - `@router` VS Code chat participant, when the host exposes the public Chat Participant API.
 - `Codex Router: New Routed Task` command and selected-code context-menu fallback.
 - One routing-session controller shared by commands and `@router`.
@@ -106,6 +106,8 @@ If something does not start, run **Codex Router: Show Diagnostics** from the Com
 | `codexRouter.modelDeck.proxyMaxTokens` | `2048` | Maximum local proxy-candidate output budget. |
 | `codexRouter.requestTimeoutMs` | `5000` | Experimental local-classifier timeout. |
 | `codexRouter.analytics.enabled` | `false` | Enables local outcome records. |
+
+The sidebar’s **Routing mode** setting controls the same `codexRouter.routing.provider` preference. **Codex deterministic routing** is the default. **ModelDeck experimental classifier** sends only the documented compact routing input to the configured loopback ModelDeck endpoint; Codex still executes the approved task in both modes.
 
 ModelDeck classification is not contacted under the default policy. The proxy command contacts ModelDeck only after its separate disclosure confirmation, regardless of the routing-provider setting. An unavailable, timed-out, malformed, non-loopback, out-of-scope, or inapplicable proxy result fails closed; it is never applied and never replaced with a generated fallback. An experimental classifier failure instead falls back visibly to the deterministic policy without a cloud-routing request.
 
