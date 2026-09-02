@@ -140,6 +140,10 @@ Codex Local Meter remains the preferred source for observing ChatGPT Codex usage
 
 Use PowerShell as the primary project shell. Package tasks invoke `pwsh -NoProfile` through `scripts/invoke.ps1`.
 
+### Project skills
+
+Codex Router development skills live in [`.codex/skills`](.codex/skills). They are eligible only in this workspace; when the installed Codex version does not discover workspace skills automatically, this repository's `AGENTS.md` routes matching work to the relevant skill. They are never installed into the global Codex skills directory.
+
 ```powershell
 npm run compile
 npm run test

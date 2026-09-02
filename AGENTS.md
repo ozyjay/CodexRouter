@@ -45,6 +45,21 @@ npm run check
 
 Run a real Codex App Server/ModelDeck smoke test only when the user explicitly opts in, because it can consume their ChatGPT allowance and relies on local runtime state. Document any live assumptions that remain unverified.
 
+## Project skills
+
+This repository owns project-scoped developer skills in [`.codex/skills`](.codex/skills). They are aids for developing Codex Router, not extension features. Do not copy, synchronise, or install them into `~/.codex/skills` or another global Codex directory.
+
+When native workspace-skill discovery is unavailable, select the matching skill below and read its `SKILL.md` before starting the task:
+
+| Skill | Use for |
+|---|---|
+| `codex-router-extension-workflow` | Commands, `@router`, sidebar, sessions, activation, and cross-cutting extension changes. |
+| `codex-router-app-server` | App Server protocol, catalogue, authentication, streaming, approvals, cancellation, and lifecycle work. |
+| `codex-router-local-routing` | Deterministic routing, ModelDeck classifier/proxy behaviour, validation, and guardrails. |
+| `codex-router-evaluation` | Evaluation manifests, simulation, proxy cohorts, worktrees, and reports. |
+| `codex-router-panel-ui` | Sidebar/webview UX, accessibility, theme support, and recovery states. |
+| `codex-router-privacy-review` | Explicit privacy or security reviews involving data disclosure, persistence, diagnostics, or deletion. |
+
 ## Documentation
 
 - Update `README.md` when configuration, commands, privacy, architecture, or manual validation changes.
