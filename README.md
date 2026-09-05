@@ -7,9 +7,8 @@ It does not use the OpenAI Platform API, request an API key, or read `~/.codex/a
 ## What is implemented
 
 - Dedicated **Codex Router** Activity Bar conversation with task composer, context disclosure, recommendation approval/override, and streamed result.
-- `@router` VS Code chat participant, when the host exposes the public Chat Participant API.
 - `Codex Router: New Routed Task` command and selected-code context-menu fallback.
-- One routing-session controller shared by commands and `@router`.
+- One routing-session controller shared by the sidebar and commands.
 - Runtime model and reasoning-effort discovery through Codex App Server `model/list`.
 - Safe authentication validation through App Server `account/read` without requesting tokens.
 - Local ModelDeck discovery (`GET /v1/models`) and structured classification (`POST /v1/chat/completions`).
@@ -23,7 +22,7 @@ It does not use the OpenAI Platform API, request an API key, or read `~/.codex/a
 ## Architecture and trust boundaries
 
 ```text
-VS Code task / @router
+VS Code sidebar / command
         |
         v
 deterministic policy (default) <---- safety baseline ---- optional ModelDeck policy
@@ -76,7 +75,7 @@ npm run compile
 
 Open this folder in VS Code and press `F5` to start an Extension Development Host. In that window:
 
-1. Select the **Codex Router** compass icon in the Activity Bar, enter a task, and choose **Get recommendation**. Alternatively, run **Codex Router: New Routed Task**, or type `@router` in VS Code Chat.
+1. Select the **Codex Router** compass icon in the Activity Bar, enter a task, and choose **Get recommendation**. Alternatively, run **Codex Router: New Routed Task**.
 2. Enter a task.
 3. Review the recommended model, effort, recommendation strength, source, limited-context summary, and rationale.
 4. Select **Use recommendation** or **Override**.
@@ -92,7 +91,7 @@ To use a ModelDeck coding route as an adviser, select up to 12,000 characters an
 
 The repository includes a **Run Codex Router** launch configuration. Open `src/extension.ts`, set a breakpoint, and press `F5`. VS Code first runs `npm run compile`, then opens an Extension Development Host with this extension loaded. Trigger **Codex Router: New Routed Task** in that development window to stop at the breakpoint. Use the **npm: watch** task while actively editing to rebuild on save.
 
-If something does not start, run **Codex Router: Show Diagnostics** from the Command Palette in the Extension Development Host. It opens the `Codex Router` output channel and records activation, Chat participant registration, App Server status, and safe error messages. `@router` requires that this VS Code host exposes the public Chat Participant API; the command entry point does not.
+If something does not start, run **Codex Router: Show Diagnostics** from the Command Palette in the Extension Development Host. It opens the `Codex Router` output channel and records activation, App Server status, and safe error messages.
 
 ## Configuration
 
@@ -177,9 +176,8 @@ This starts a real Codex turn and consumes the user’s ChatGPT Codex allowance:
 ## Current limitations and next steps
 
 - The installed `codex-cli 0.150.1` schema was inspected for `account/read`, `model/list`, `turn/start`, `turn/interrupt`, terminal turn states, and approval requests. Real Codex execution and the configured ModelDeck proxy route still require the explicit manual smoke test above because they depend on local runtime state; a routed Codex turn consumes ChatGPT allowance.
-- The sidebar, commands, and `@router` share the same routing-session controller. The sidebar supports task-only routing and optional active-file metadata; selected-code and ModelDeck proxy flows remain available from their commands.
+- The sidebar and commands share the same routing-session controller. The sidebar supports task-only routing and optional active-file metadata; selected-code and ModelDeck proxy flows remain available from their commands.
 - Build/test outcomes and repair-turn counts are deliberately user-reported rather than inferred from model output.
-- The `@router` entry point depends on the host enabling VS Code’s public Chat Participant API. The command entry point is always available.
 
 Future work should add representative matched live evaluations. Automatic adaptation remains research-only until reproducible evidence supports it.
 

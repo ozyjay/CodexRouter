@@ -46,22 +46,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("codexRouter.showDiagnostics", () => showDiagnostics())
   );
 
-  if (vscode.chat) {
-    const participant = vscode.chat.createChatParticipant("codex-router.router", async (request, _chatContext, stream, token) => {
-      await routeAndRun(context, sessionInput(request.prompt), {
-        progress: (message) => stream.progress(message),
-        text: (message) => stream.markdown(message),
-        onCancellationRequested: (listener) => token.onCancellationRequested(listener)
-      });
-      return {};
-    });
-    participant.iconPath = new vscode.ThemeIcon("compass");
-    context.subscriptions.push(participant);
-    output.appendLine("Registered the @router chat participant.");
-  } else {
-    output.appendLine("VS Code Chat Participant API is unavailable; use the New Routed Task command.");
-  }
-
   void refreshStatus();
 }
 

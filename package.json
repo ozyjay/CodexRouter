@@ -80,15 +80,6 @@
         }
       ]
     },
-    "chatParticipants": [
-      {
-        "id": "codex-router.router",
-        "name": "router",
-        "fullName": "Codex Router",
-        "description": "Route a task to the appropriate Codex model and reasoning effort",
-        "isSticky": true
-      }
-    ],
     "configuration": {
       "title": "Codex Router",
       "properties": {

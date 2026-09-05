@@ -22,7 +22,6 @@ Codex Router is a local, privacy-preserving VS Code companion. It recommends a C
 ## UX direction
 
 - The primary UX is a dedicated, small Codex Router panel or view, with a task composer, recommendation card, explicit approval/override, and streamed result.
-- `@router` is an optional VS Code Chat entry point. It must not be required, because the Chat Participant API may not be present in every host and it cannot be embedded in the Codex extension’s private composer.
 - Keep command-palette and editor-selection commands as reliable fallbacks.
 - Prefer native VS Code controls. Use a webview only for the composed router panel where native controls cannot express the approval and streaming flow well.
 - Make unavailable states explicit: ChatGPT authentication rejected, App Server unavailable, ModelDeck unavailable, local fallback selected, and no model catalogue.
@@ -52,7 +51,7 @@ This repository owns project-scoped developer skills in [`.codex/skills`](.codex
 
 Use the matching skill below before starting work in its stated scope. If native workspace-skill discovery is unavailable, read the linked `SKILL.md` directly.
 
-- [`codex-router-extension-workflow`](.codex/skills/codex-router-extension-workflow/SKILL.md): commands, `@router`, sidebar, sessions, activation, and cross-cutting extension changes.
+- [`codex-router-extension-workflow`](.codex/skills/codex-router-extension-workflow/SKILL.md): commands, sidebar, sessions, activation, and cross-cutting extension changes.
 - [`codex-router-app-server`](.codex/skills/codex-router-app-server/SKILL.md): App Server protocol, catalogue, authentication, streaming, approvals, cancellation, and lifecycle work.
 - [`codex-router-local-routing`](.codex/skills/codex-router-local-routing/SKILL.md): deterministic routing, ModelDeck classifier/proxy behaviour, validation, and guardrails.
 - [`codex-router-evaluation`](.codex/skills/codex-router-evaluation/SKILL.md): evaluation manifests, simulation, proxy cohorts, worktrees, and reports.

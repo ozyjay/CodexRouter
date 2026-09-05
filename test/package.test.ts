@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("extension configuration keeps deterministic routing and analytics-safe defaults", async () => {
-  const manifest = JSON.parse(await readFile("package.json", "utf8")) as { contributes: { commands: Array<{ command: string }>; configuration: { properties: Record<string, { default?: unknown }> }; viewsContainers: { activitybar: Array<{ id: string }> }; views: Record<string, Array<{ id: string; type: string }>> } };
+  const manifest = JSON.parse(await readFile("package.json", "utf8")) as { contributes: { commands: Array<{ command: string }>; configuration: { properties: Record<string, { default?: unknown }> }; viewsContainers: { activitybar: Array<{ id: string }> }; views: Record<string, Array<{ id: string; type: string }>>; chatParticipants?: unknown } };
   const properties = manifest.contributes.configuration.properties;
   assert.equal(properties["codexRouter.routing.provider"].default, "deterministic");
   assert.equal(properties["codexRouter.analytics.enabled"].default, false);
@@ -12,4 +12,5 @@ test("extension configuration keeps deterministic routing and analytics-safe def
   assert.ok(manifest.contributes.commands.some(({ command }) => command === "codexRouter.generateProxyCandidate"));
   assert.ok(manifest.contributes.viewsContainers.activitybar.some(({ id }) => id === "codexRouter"));
   assert.ok(manifest.contributes.views.codexRouter.some((view) => view.id === "codexRouter.sidebar" && view.type === "webview"));
+  assert.equal(manifest.contributes.chatParticipants, undefined);
 });

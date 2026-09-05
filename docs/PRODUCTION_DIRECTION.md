@@ -2,7 +2,7 @@
 
 ## Decision
 
-Build Codex Router as an independent VS Code extension with its own focused router workspace. Do not attempt to inject `@router` into the existing Codex extension. The Codex extension is a separate product surface; it does not expose a supported public composer-interception API. VS Code Chat participation remains an optional secondary entry point, not the primary product.
+Build Codex Router as an independent VS Code extension with its own focused router workspace. Do not attempt to inject routing into the existing Codex extension or VS Code Chat. The Codex extension is a separate product surface and does not expose a supported public composer-interception API.
 
 The production experience should make routing intentional and inspectable before a Codex turn begins, while leaving the established Codex extension free to handle ordinary direct conversations.
 
@@ -10,7 +10,7 @@ The production experience should make routing intentional and inspectable before
 
 The evidence-first command milestone is implemented and is now complemented by the router sidebar:
 
-- commands and `@router` share one routing-session controller;
+- the sidebar and commands share one routing-session controller;
 - routing and execution context are separate and previewed;
 - deterministic routing is the default policy;
 - ModelDeck is explicitly opt-in and experimental;
@@ -70,7 +70,6 @@ Selecting **Use recommendation** starts a new App Server thread. Selecting **Ove
 - **Send Selection to Codex Router** appears in the editor context menu.
 - **Generate ModelDeck Proxy Candidate for Selection** appears beside it and requires a separate context-disclosure confirmation.
 - The status item is concise: ready model/effort, fallback, authentication issue, or App Server issue.
-- `@router` is supported only when the VS Code Chat Participant API is available. It should direct into the same routing service and recommendation flow rather than becoming a separate product.
 
 ## Production architecture
 
@@ -132,7 +131,7 @@ Before relying on it, validate the exact active ModelDeck profile, model ID, `re
 - Add the Activity Bar router panel.
 - Implement stateful composer, visible sent-context preview, recommendation card, constrained overrides, and streamed transcript.
 - Add accessible keyboard interaction and theme testing.
-- Retain commands and `@router` as alternative entry points into the same service.
+- Retain commands as alternative entry points into the same service.
 
 **Exit criterion:** the primary flow works without opening the VS Code Chat view or the Codex extension.
 
