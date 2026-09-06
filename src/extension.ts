@@ -9,6 +9,7 @@ import { prepareSelectionProxyCandidate, renderProxyCandidateMarkdown } from "./
 import { RoutingSessionController } from "./session";
 import { StreamTokenEstimator, StreamThroughput } from "./streamMetrics";
 import { RoutingDiagnostics, diagnosticIdentifier } from "./routingDiagnostics";
+import { SidebarConversation } from "./conversation";
 
 let appServer: CodexAppServer | undefined;
 let activeSession: RoutingSessionController | undefined;
@@ -196,7 +197,7 @@ async function generateProxyCandidate(context: vscode.ExtensionContext): Promise
   }
 }
 
-async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessionInput, sink: StreamSink): Promise<void> {
+async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessionInput, sink: StreamSink, conversation?: SidebarConversation): Promise<void> {
   if (!vscode.workspace.isTrusted) {
     sink.text("Codex Router requires a trusted workspace before it can submit a coding task.");
     return;
@@ -212,6 +213,7 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
   sink = { ...originalSink, text: (message) => { diagnostics.delta(message); originalSink.text(message); } };
   try {
     diagnostics.sensitive("session.input", input);
+    diagnostics.record("conversation.context", { continued: conversation?.hasContext ?? false });
     sink.progress("Checking ChatGPT-authenticated Codex and available models…");
     const server = await getServer();
     const status = await server.start();
@@ -226,10 +228,11 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
     session = new RoutingSessionController(input, (routingInput, models) => route(routingInput, models, diagnostics), {
       execute: (prompt, selection, signal) => {
         diagnostics.sensitive("codex.prompt", prompt);
-        return executeTurn(server, prompt, selection, signal, sink);
+        return executeTurn(server, prompt, selection, signal, sink, conversation);
       }
     });
     const summaries = session.contextSummary();
+    if (conversation?.hasContext) summaries.execution += "; previous turns in this conversation";
     sink.text(`**Context preview**\n\nRouting: ${summaries.routing}.\n\nCodex execution: ${summaries.execution}.\n\n`);
     const recommendation = await session.analyse(status.models);
     diagnostics.record("routing.recommended", { model: recommendation.recommendedModel, effort: recommendation.recommendedEffort, source: recommendation.source, providerFallback: recommendation.providerFallback, catalogueFallback: recommendation.catalogueFallback });
@@ -312,12 +315,17 @@ async function chooseConfiguration(session: RoutingSessionController, recommenda
   return session.override(model.model.model, effort.label, models);
 }
 
-async function executeTurn(server: CodexAppServer, prompt: string, selection: AllocationSelection, signal: AbortSignal, sink: StreamSink): Promise<TurnState> {
+async function executeTurn(server: CodexAppServer, prompt: string, selection: AllocationSelection, signal: AbortSignal, sink: StreamSink, conversation?: SidebarConversation): Promise<TurnState> {
   const earlyEvents: Array<{ method: string; params: unknown }> = [];
   const bufferEarlyEvent = (method: string, params: unknown) => earlyEvents.push({ method, params });
   server.on("notification", bufferEarlyEvent);
-  const { threadId, turnId } = await server.startTurn(prompt, workspacePath(), selection.model, selection.effort);
-  server.off("notification", bufferEarlyEvent);
+  let started: { threadId: string; turnId: string };
+  try {
+    started = conversation ? await conversation.startTurn(server, prompt, workspacePath(), selection) : await server.startTurn(prompt, workspacePath(), selection.model, selection.effort);
+  } finally {
+    server.off("notification", bufferEarlyEvent);
+  }
+  const { threadId, turnId } = started;
   sink.activity?.("running", `Codex is working with ${selection.model} / ${selection.effort}.`);
 
   let interruptRequested = false;
@@ -589,6 +597,7 @@ class RouterSidebarProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private pendingSelection?: { resolve: (selection: AllocationSelection | undefined) => void; session: RoutingSessionController; models: CodexModel[] };
   private inFlight = false;
+  private readonly conversation = new SidebarConversation();
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -601,6 +610,7 @@ class RouterSidebarProvider implements vscode.WebviewViewProvider {
       if (event.affectsConfiguration("codexRouter.routing.provider")) this.postRoutingProvider();
     }));
     view.onDidDispose(() => {
+      this.conversation.reset();
       this.pendingSelection?.resolve(undefined);
       this.pendingSelection = undefined;
       this.view = undefined;
@@ -611,6 +621,12 @@ class RouterSidebarProvider implements vscode.WebviewViewProvider {
     if (!isSidebarMessage(message)) return;
     if (message.type === "ready") {
       this.postRoutingProvider();
+      return;
+    }
+    if (message.type === "new-conversation") {
+      if (this.inFlight) return;
+      this.conversation.reset();
+      this.post({ type: "conversation-reset" });
       return;
     }
     if (message.type === "cancel") {
@@ -637,7 +653,11 @@ class RouterSidebarProvider implements vscode.WebviewViewProvider {
       } : undefined;
       this.inFlight = true;
       this.post({ type: "started" });
-      await routeAndRun(this.context, sessionInput(task, metadata), this.sink());
+      try {
+        await routeAndRun(this.context, sessionInput(task, metadata), this.sink(), this.conversation);
+      } finally {
+        this.inFlight = false;
+      }
       return;
     }
     if (message.type === "selection" && this.pendingSelection) {
@@ -695,10 +715,11 @@ class RouterSidebarProvider implements vscode.WebviewViewProvider {
   }
 }
 
-function isSidebarMessage(value: unknown): value is { type: "ready" } | { type: "submit"; task: string; includeMetadata: boolean } | { type: "cancel" } | { type: "routing-provider"; provider: RoutingProvider } | { type: "selection"; useRecommendation: boolean; model: string; effort: string } {
+function isSidebarMessage(value: unknown): value is { type: "ready" } | { type: "new-conversation" } | { type: "submit"; task: string; includeMetadata: boolean } | { type: "cancel" } | { type: "routing-provider"; provider: RoutingProvider } | { type: "selection"; useRecommendation: boolean; model: string; effort: string } {
   if (!value || typeof value !== "object" || !("type" in value)) return false;
   const message = value as Record<string, unknown>;
   if (message.type === "ready") return true;
+  if (message.type === "new-conversation") return true;
   if (message.type === "cancel") return true;
   if (message.type === "routing-provider") return message.provider === "deterministic" || message.provider === "modeldeck-experimental";
   if (message.type === "submit") return typeof message.task === "string" && typeof message.includeMetadata === "boolean";
@@ -723,9 +744,9 @@ textarea,select{background:var(--vscode-input-background);border:1px solid var(-
 </style>
 </head><body>
 <h1>Codex Router</h1>
-<section aria-label="New routed task"><label class="field" for="provider">Recommendation source</label><select id="provider"><option value="deterministic">Deterministic (recommended)</option><option value="modeldeck-experimental">Local SLM (experimental)</option></select><label class="field" for="task">Task</label><textarea id="task" placeholder="Describe the coding task…" aria-describedby="task-hint"></textarea><p id="task-hint" class="hint">Enter to recommend · Shift+Enter for a new line.</p><label class="field-inline"><input id="metadata" type="checkbox"> Include active-file metadata</label><div class="actions"><button id="cancel" class="button secondary">Cancel</button></div></section>
+<section aria-label="New routed task"><button id="newConversation" class="button secondary" type="button">New conversation</button><p class="hint">Follow-ups retain previous Codex turns until you start a new conversation or close this view.</p><label class="field" for="provider">Recommendation source</label><select id="provider"><option value="deterministic">Deterministic (recommended)</option><option value="modeldeck-experimental">Local SLM (experimental)</option></select><label class="field" for="task">Task</label><textarea id="task" placeholder="Describe the coding task…" aria-describedby="task-hint"></textarea><p id="task-hint" class="hint">Enter to recommend · Shift+Enter for a new line.</p><label class="field-inline"><input id="metadata" type="checkbox"> Include active-file metadata</label><div class="actions"><button id="cancel" class="button secondary">Cancel</button></div></section>
 <div id="activity" class="activity" role="status" aria-live="polite" hidden><span id="spinner" class="spinner" aria-hidden="true"></span><span id="activity-message"></span></div>
 <main id="conversation" class="conversation" aria-live="polite" aria-label="Codex Router activity"></main>
 <section id="recommendation" class="recommendation" aria-label="Recommended Codex configuration"><p id="allocation" class="allocation"></p><p id="reasons" class="hint"></p><div class="actions"><button id="accept" class="button primary">Start Codex</button></div><div class="override-fields"><label class="field" for="model">Override model</label><select id="model"></select><label class="field" for="effort">Effort</label><select id="effort"></select><div class="actions"><button id="override" class="button secondary">Start override</button></div></div></section>
-<script nonce="${nonce}">const vscode=acquireVsCodeApi(),task=document.getElementById('task'),metadata=document.getElementById('metadata'),cancel=document.getElementById('cancel'),provider=document.getElementById('provider'),conversation=document.getElementById('conversation'),recommendation=document.getElementById('recommendation'),model=document.getElementById('model'),effort=document.getElementById('effort'),accept=document.getElementById('accept'),override=document.getElementById('override'),activity=document.getElementById('activity'),activityMessage=document.getElementById('activity-message'),spinner=document.getElementById('spinner');let models=[],assistantMessage,uiState='idle';function post(value){vscode.postMessage(value)}function addMessage(role,text){const message=document.createElement('div');message.className='message '+role;message.textContent=text;conversation.append(message);message.scrollIntoView({block:'end'});return message}function setUiState(state,message){uiState=state;const awaiting=state==='awaiting-approval',active=state==='starting'||state==='running',locked=state!=='idle';task.disabled=locked;metadata.disabled=locked;provider.disabled=locked;accept.disabled=!awaiting;override.disabled=!awaiting;model.disabled=!awaiting;effort.disabled=!awaiting;cancel.style.display=active?'block':'none';recommendation.style.display=awaiting?'block':'none';activity.hidden=state==='idle';spinner.hidden=awaiting;if(message)activityMessage.textContent=message}function updateEfforts(){const selected=models.find(entry=>entry.model===model.value);effort.replaceChildren(...(selected?.efforts??[]).map(value=>{const option=document.createElement('option');option.value=value;option.textContent=value;return option}))}function submit(){const value=task.value.trim();if(!value)return;addMessage('user',value);assistantMessage=addMessage('assistant','Checking Codex…');task.value='';setUiState('analysing','Checking Codex and selecting a configuration…');post({type:'submit',task:value,includeMetadata:metadata.checked})}task.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!task.disabled){event.preventDefault();submit()}});cancel.addEventListener('click',()=>post({type:'cancel'}));provider.addEventListener('change',()=>post({type:'routing-provider',provider:provider.value}));model.addEventListener('change',updateEfforts);accept.addEventListener('click',()=>{setUiState('starting','Starting Codex with the recommended configuration…');post({type:'selection',useRecommendation:true,model:'',effort:''})});override.addEventListener('click',()=>{setUiState('starting','Starting Codex with your override…');post({type:'selection',useRecommendation:false,model:model.value,effort:effort.value})});window.addEventListener('message',event=>{const message=event.data;if(message.type==='routing-provider'){provider.value=message.provider}if(message.type==='started'){setUiState('analysing','Checking Codex and selecting a configuration…')}if(message.type==='activity'){setUiState(message.state,message.message)}if(message.type==='progress'){if(assistantMessage)assistantMessage.textContent=message.message;if(uiState!=='awaiting-approval')activityMessage.textContent=message.message}if(message.type==='output'){if(assistantMessage)assistantMessage.textContent+=message.message}if(message.type==='throughput'&&assistantMessage&&message.value.tokensPerSecond){assistantMessage.dataset.rate='≈ '+message.value.tokensPerSecond.toFixed(1)+' tok/s'}if(message.type==='error'){if(assistantMessage)assistantMessage.textContent+=message.message}if(message.type==='recommendation'){models=message.models;document.getElementById('allocation').textContent=message.recommendation.model+' / '+message.recommendation.effort;document.getElementById('reasons').textContent=message.recommendation.reasons.join(' ');model.replaceChildren(...models.map(entry=>{const option=document.createElement('option');option.value=entry.model;option.textContent=entry.displayName+' ('+entry.model+')';return option}));model.value=message.recommendation.model;updateEfforts();effort.value=message.recommendation.effort;conversation.append(recommendation);setUiState('awaiting-approval','Review the recommendation before starting Codex.');recommendation.scrollIntoView({block:'end'});accept.focus()}if(message.type==='finished'){setUiState('idle','');assistantMessage=undefined;task.focus()}});setUiState('idle','');post({type:'ready'});</script></body></html>`;
+<script nonce="${nonce}">const vscode=acquireVsCodeApi(),task=document.getElementById('task'),metadata=document.getElementById('metadata'),cancel=document.getElementById('cancel'),provider=document.getElementById('provider'),conversation=document.getElementById('conversation'),recommendation=document.getElementById('recommendation'),model=document.getElementById('model'),effort=document.getElementById('effort'),accept=document.getElementById('accept'),override=document.getElementById('override'),activity=document.getElementById('activity'),activityMessage=document.getElementById('activity-message'),spinner=document.getElementById('spinner');let models=[],assistantMessage,uiState='idle';function post(value){vscode.postMessage(value)}function addMessage(role,text){const message=document.createElement('div');message.className='message '+role;message.textContent=text;conversation.append(message);message.scrollIntoView({block:'end'});return message}function setUiState(state,message){uiState=state;const awaiting=state==='awaiting-approval',active=state==='starting'||state==='running',locked=state!=='idle';task.disabled=locked;document.getElementById('newConversation').disabled=locked;metadata.disabled=locked;provider.disabled=locked;accept.disabled=!awaiting;override.disabled=!awaiting;model.disabled=!awaiting;effort.disabled=!awaiting;cancel.style.display=active?'block':'none';recommendation.style.display=awaiting?'block':'none';activity.hidden=state==='idle';spinner.hidden=awaiting;if(message)activityMessage.textContent=message}function updateEfforts(){const selected=models.find(entry=>entry.model===model.value);effort.replaceChildren(...(selected?.efforts??[]).map(value=>{const option=document.createElement('option');option.value=value;option.textContent=value;return option}))}function submit(){const value=task.value.trim();if(!value)return;addMessage('user',value);assistantMessage=addMessage('assistant','Checking Codex…');task.value='';setUiState('analysing','Checking Codex and selecting a configuration…');post({type:'submit',task:value,includeMetadata:metadata.checked})}task.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!task.disabled){event.preventDefault();submit()}});document.getElementById('newConversation').addEventListener('click',()=>post({type:'new-conversation'}));cancel.addEventListener('click',()=>post({type:'cancel'}));provider.addEventListener('change',()=>post({type:'routing-provider',provider:provider.value}));model.addEventListener('change',updateEfforts);accept.addEventListener('click',()=>{setUiState('starting','Starting Codex with the recommended configuration…');post({type:'selection',useRecommendation:true,model:'',effort:''})});override.addEventListener('click',()=>{setUiState('starting','Starting Codex with your override…');post({type:'selection',useRecommendation:false,model:model.value,effort:effort.value})});window.addEventListener('message',event=>{const message=event.data;if(message.type==='conversation-reset'){document.body.append(recommendation);recommendation.style.display='none';conversation.replaceChildren();assistantMessage=undefined;task.focus()}if(message.type==='routing-provider'){provider.value=message.provider}if(message.type==='started'){setUiState('analysing','Checking Codex and selecting a configuration…')}if(message.type==='activity'){setUiState(message.state,message.message)}if(message.type==='progress'){if(assistantMessage)assistantMessage.textContent=message.message;if(uiState!=='awaiting-approval')activityMessage.textContent=message.message}if(message.type==='output'){if(assistantMessage)assistantMessage.textContent+=message.message}if(message.type==='throughput'&&assistantMessage&&message.value.tokensPerSecond){assistantMessage.dataset.rate='≈ '+message.value.tokensPerSecond.toFixed(1)+' tok/s'}if(message.type==='error'){if(assistantMessage)assistantMessage.textContent+=message.message}if(message.type==='recommendation'){models=message.models;document.getElementById('allocation').textContent=message.recommendation.model+' / '+message.recommendation.effort;document.getElementById('reasons').textContent=message.recommendation.reasons.join(' ');model.replaceChildren(...models.map(entry=>{const option=document.createElement('option');option.value=entry.model;option.textContent=entry.displayName+' ('+entry.model+')';return option}));model.value=message.recommendation.model;updateEfforts();effort.value=message.recommendation.effort;conversation.append(recommendation);setUiState('awaiting-approval','Review the recommendation before starting Codex.');recommendation.scrollIntoView({block:'end'});accept.focus()}if(message.type==='finished'){setUiState('idle','');assistantMessage=undefined;task.focus()}});setUiState('idle','');post({type:'ready'});</script></body></html>`;
 }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CodexModel } from "../src/contracts";
+import { CLASSIFIER_SCHEMA } from "../src/classifierSchema";
 import { ModelDeckClassifierError, ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl, assertModelDeckModelId, classifyModelDeckFailure, modelDeckFailureDiagnostic, modelDeckRawFailureResponse } from "../src/modelDeck";
 
 test("evaluation diagnostics retain malformed proxy responses before rejection without headers", async () => {
@@ -120,11 +121,30 @@ test("ModelDeck classifier receives metadata but never execution source", async 
     assert.doesNotMatch(requestBody, /secret source excerpt/);
     const messages = JSON.parse(requestBody).messages;
     assert.deepEqual(JSON.parse(messages[1].content).availableModels, [{ model: "gpt-current", supportedReasoningEfforts: ["adaptive"], defaultReasoningEffort: "adaptive", isDefault: true }]);
+    assert.deepEqual(JSON.parse(messages[1].content).responseSchema, CLASSIFIER_SCHEMA);
+    assert.match(messages[0].content, /not safety risk/);
     assert.match(messages[0].content, /Choose recommendedModel exactly/);
     assert.doesNotMatch(requestBody, /Private|hidden-model|no-efforts/);
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("classifier normalises the observed risk alias and reports invalid field names", async () => {
+  const originalFetch = globalThis.fetch;
+  let risk = "low";
+  globalThis.fetch = (async (url) => new Response(JSON.stringify(String(url).endsWith("/models")
+    ? { data: [{ id: "router", ready: true }] }
+    : { choices: [{ message: { content: JSON.stringify({ taskType: "documentation", scope: "narrow", complexity: "low", risk, ambiguity: "low", recommendedModel: "current", recommendedEffort: "low", confidence: 0.8, reasons: ["README assessment."], escalationSignals: [] }) } }] }))) as typeof fetch;
+  try {
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
+    assert.equal((await provider.classify({ task: "Assess the README" })).risk, "normal");
+    risk = "unknown";
+    await assert.rejects(provider.classify({ task: "Assess the README" }), (error: unknown) => {
+      assert.equal(modelDeckFailureDiagnostic(error), "contract-validation-failed; fields: risk");
+      return true;
+    });
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("ModelDeck unavailable, no-ready-model and timeout failures are classified safely", async () => {

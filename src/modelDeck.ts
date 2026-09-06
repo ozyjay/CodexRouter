@@ -1,6 +1,7 @@
 import { CodexModel, MODELDECK_POLICY_VERSION, ProviderFallback, RoutingInput, RoutingRecommendation } from "./contracts";
 import { SimulationProfile } from "./evaluation";
 import { fallbackRoute, isValidRecommendation } from "./routing";
+import { CLASSIFIER_SCHEMA, classifierValidationIssues, normaliseClassifierRisk } from "./classifierSchema";
 
 export interface ModelDeckConfig {
   baseUrl: string;
@@ -71,7 +72,8 @@ export class ModelDeckClassifierError extends Error {
   public constructor(
     public readonly diagnostic: "no-completion-content" | "json-parse-failed" | "contract-validation-failed",
     /** Retained only until an explicitly enabled local diagnostic sink handles the error. */
-    public readonly rawResponse?: string
+    public readonly rawResponse?: string,
+    public readonly invalidFields: string[] = []
   ) {
     super(diagnostic === "no-completion-content"
       ? "ModelDeck returned no chat-completion content."
@@ -137,7 +139,7 @@ export class ModelDeckProvider {
         max_tokens: 512,
         messages: [
           { role: "system", content: ROUTER_PROMPT },
-          { role: "user", content: JSON.stringify({ ...input, availableModels: classifierCatalogue(models) }) }
+          { role: "user", content: JSON.stringify({ ...input, availableModels: classifierCatalogue(models), responseSchema: CLASSIFIER_SCHEMA }) }
         ]
       })
     });
@@ -150,7 +152,10 @@ export class ModelDeckProvider {
       if (error instanceof ModelDeckClassifierError) throw error;
       throw new ModelDeckClassifierError("json-parse-failed", content);
     }
-    if (!isValidRecommendation(candidate)) throw new ModelDeckClassifierError("contract-validation-failed", content);
+    const normalised = normaliseClassifierRisk(candidate);
+    if (normalised !== candidate) this.config.developmentDebug?.("normalised", { field: "risk", from: "low", to: "normal" });
+    candidate = normalised;
+    if (!isValidRecommendation(candidate)) throw new ModelDeckClassifierError("contract-validation-failed", content, classifierValidationIssues(candidate));
     const baseline = fallbackRoute(input);
     return {
       ...candidate,
@@ -268,7 +273,7 @@ export function classifyModelDeckFailure(error: unknown): ProviderFallback {
 }
 
 export function modelDeckFailureDiagnostic(error: unknown): string | undefined {
-  return error instanceof ModelDeckClassifierError ? error.diagnostic : undefined;
+  return error instanceof ModelDeckClassifierError ? `${error.diagnostic}${error.invalidFields.length ? `; fields: ${error.invalidFields.join(", ")}` : ""}` : undefined;
 }
 
 export function modelDeckRawFailureResponse(error: unknown): string | undefined {
@@ -407,6 +412,7 @@ confidence: number from 0 to 1;
 reasons: array of at most 3 concise strings, each under 240 characters;
 escalationSignals: array of at most 4 concise strings.
 Choose recommendedModel exactly from availableModels[].model and recommendedEffort from that model's supportedReasoningEfforts. Never invent a model ID or effort, use a local ModelDeck model ID, or infer availability from prior knowledge. Use task complexity and risk to choose among these advertised combinations; use the advertised default model/effort when uncertain.
+Follow responseSchema exactly. Risk measures potential harm from executing the task: normal for documentation, brainstorming and reversible local edits; elevated for consequential but recoverable changes; high for destructive changes, credentials, security controls or data integrity. Creative originality, broad scope and uncertainty affect complexity or ambiguity, not safety risk. A request to invent a novel game can be high complexity and high ambiguity while remaining normal risk. A README assessment is narrow, low complexity and normal risk. A follow-up referring to 'this' without supplied context has high ambiguity. Escalation signals must be observed facts, not speculative 'if' statements. Do not choose max or ultra effort solely because a task requests creativity.
 You provide advice only. Do not include source code, credentials, repository content, markdown, or prose outside the JSON object.`;
 
 const SIMULATION_SELECTOR_PROMPT = `You are a local simulation-tier selector for a deterministic evaluation harness. Return only one JSON object with exactly these fields:

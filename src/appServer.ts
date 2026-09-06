@@ -26,6 +26,9 @@ export class CodexAppServer extends EventEmitter {
   private readonly pending = new Map<number, { method: string; resolve: (value: unknown) => void; reject: (error: Error) => void; timeout: NodeJS.Timeout }>();
   private buffer = "";
   private startPromise?: Promise<AppServerStatus>;
+  private processGeneration = 0;
+
+  get generation(): number { return this.processGeneration; }
 
   public constructor(
     private readonly createProcess: () => ChildProcessWithoutNullStreams = () => spawn("codex", ["app-server", "--stdio"], { stdio: "pipe", shell: false }),
@@ -46,6 +49,7 @@ export class CodexAppServer extends EventEmitter {
   }
 
   private async startProcess(): Promise<AppServerStatus> {
+    this.processGeneration++;
     this.process = this.createProcess();
     this.process.stdout.setEncoding("utf8");
     this.process.stderr.setEncoding("utf8");
@@ -75,9 +79,9 @@ export class CodexAppServer extends EventEmitter {
     return { authMethod: authResult.account?.type ?? null, requiresOpenaiAuth: authResult.requiresOpenaiAuth ?? null, models: listResult.data };
   }
 
-  async startTurn(task: string, cwd: string, model: string, effort: ReasoningEffort): Promise<{ threadId: string; turnId: string }> {
-    const threadResponse = await this.request("thread/start", { cwd, model, allowProviderModelFallback: false });
-    const threadId = (threadResponse as { thread?: { id?: string } }).thread?.id;
+  async startTurn(task: string, cwd: string, model: string, effort: ReasoningEffort, existingThreadId?: string): Promise<{ threadId: string; turnId: string }> {
+    const threadResponse = existingThreadId ? undefined : await this.request("thread/start", { cwd, model, allowProviderModelFallback: false });
+    const threadId = existingThreadId ?? (threadResponse as { thread?: { id?: string } })?.thread?.id;
     if (!threadId) throw new Error("Codex App Server did not return a thread ID.");
     const turnResponse = await this.request("turn/start", {
       threadId,

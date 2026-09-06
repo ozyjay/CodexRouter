@@ -47,6 +47,7 @@ Each provider integration must:
 - discover or explicitly configure its local classifier model without assuming provider-specific model identifiers;
 - use a compact, schema-constrained prompt and strictly validate the returned recommendation;
 - supply the current visible App Server model/effort combinations to the classifier and validate the selected pair against that same catalogue;
+- provide a machine-readable response schema backed by shared validation rules, distinguish execution risk from creative complexity, and retain bounded field-level rejection diagnostics;
 - enforce bounded timeouts and show the active provider and any failure clearly; and
 - fall back to deterministic local rules without any cloud-routing request.
 

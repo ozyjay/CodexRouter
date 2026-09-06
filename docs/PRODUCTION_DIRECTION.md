@@ -62,7 +62,7 @@ The recommendation card is the centre of the product. It must show:
 - a model/effort override that is constrained to App Server-discovered choices;
 - a small warning for guardrail escalation, for example “Security-sensitive task: Sol/high selected”.
 
-Selecting **Use recommendation** starts a new App Server thread. Selecting **Override** opens native VS Code Quick Picks initially; the production panel may later render the same constrained controls directly.
+Selecting **Use recommendation** starts a turn in the sidebar's current App Server thread, creating the thread on the first turn. Follow-ups retain Codex conversation context while model and effort remain selectable before each approved turn. **New conversation** explicitly resets the sidebar; standalone command tasks start independent threads. Conversation identity is held in extension-host memory and is never shared across workspaces. If the App Server restarts, require an explicit reset. Selecting **Override** uses the same catalogue-constrained allocation flow.
 
 ### Secondary entry points
 

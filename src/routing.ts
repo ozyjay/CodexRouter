@@ -1,3 +1,4 @@
+import { classifierValidationIssues } from "./classifierSchema";
 import {
   CatalogueFallback,
   ClassifierRecommendation,
@@ -30,26 +31,8 @@ const RISK_PATTERNS: Array<[RiskSignal, RegExp]> = [
   ["data-integrity", /\b(data integrity|corruption|transaction|rollback|idempotency)\b/i]
 ];
 
-const EXPECTED_CLASSIFIER_KEYS = [
-  "taskType", "scope", "complexity", "risk", "ambiguity", "recommendedModel", "recommendedEffort", "confidence", "reasons", "escalationSignals"
-] as const;
-
 export function isValidRecommendation(value: unknown): value is ClassifierRecommendation {
-  if (!isRecord(value)) return false;
-  const keys = Object.keys(value);
-  if (keys.length !== EXPECTED_CLASSIFIER_KEYS.length || !EXPECTED_CLASSIFIER_KEYS.every((key) => key in value)) return false;
-  return ["implementation", "debugging", "documentation", "testing", "refactor", "other"].includes(value.taskType as string)
-    && ["narrow", "medium", "broad"].includes(value.scope as string)
-    && ["low", "moderate", "high"].includes(value.complexity as string)
-    && ["normal", "elevated", "high"].includes(value.risk as string)
-    && ["low", "medium", "high"].includes(value.ambiguity as string)
-    && typeof value.recommendedModel === "string" && value.recommendedModel.length > 0
-    && typeof value.recommendedEffort === "string" && value.recommendedEffort.length > 0
-    && typeof value.confidence === "number" && Number.isFinite(value.confidence) && value.confidence >= 0 && value.confidence <= 1
-    && Array.isArray(value.reasons) && value.reasons.length > 0 && value.reasons.length <= 3
-    && value.reasons.every((reason) => typeof reason === "string" && reason.trim().length > 0 && reason.length <= 240 && !/[\r\n]/.test(reason))
-    && Array.isArray(value.escalationSignals) && value.escalationSignals.length <= 4
-    && value.escalationSignals.every((signal) => typeof signal === "string" && signal.length <= 240 && !/[\r\n]/.test(signal));
+  return classifierValidationIssues(value).length === 0;
 }
 
 export function assessTask(input: RoutingInput): RoutingAssessment {

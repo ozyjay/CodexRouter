@@ -49,6 +49,9 @@ test("App Server correlates requests and forwards stream notifications", async (
   assert.deepEqual(requests.find((request) => request.method === "account/read")?.params, { refreshToken: false });
   const turn = await server.startTurn("Fix the test", "/workspace", "gpt-5.6-terra", "medium");
   assert.deepEqual(turn, { threadId: "thread-1", turnId: "turn-1" });
+  await server.startTurn("Write that proposal", "/workspace", "gpt-5.6-sol", "high", turn.threadId);
+  assert.equal(requests.filter((request) => request.method === "thread/start").length, 1);
+  assert.deepEqual(requests.filter((request) => request.method === "turn/start").at(-1)?.params, { threadId: "thread-1", input: [{ type: "text", text: "Write that proposal" }], model: "gpt-5.6-sol", effort: "high" });
   stdout.emit("data", `${JSON.stringify({ method: "item/agentMessage/delta", params: { threadId: "thread-1", turnId: "turn-1", delta: "Hello" } })}\n`);
   assert.equal(notifications[0].method, "item/agentMessage/delta");
   server.dispose();
