@@ -15,7 +15,8 @@ Codex Router is a local, privacy-preserving VS Code companion. It recommends a C
 - Router inference must stay local. ModelDeck endpoints must use literal loopback addresses (`127.0.0.1` or `::1`); do not add cloud fallback.
 - Send the router only the user task, explicitly selected content, and compact metadata required for classification. Never send the complete workspace by default.
 - By default, diagnostics may contain only privacy-safe categories and operational metadata. Do not log complete task prompts, repository content, generated model output, raw App Server protocol messages, or credentials.
-- The sole diagnostic exception is a rejected local ModelDeck classifier response when the user has explicitly enabled `codexRouter.diagnostics.logRawClassifierResponses`. Keep it in the local output channel only, clearly label it as sensitive, and never persist, export, forward, or otherwise reuse it.
+- The extension diagnostic exception is a rejected local ModelDeck classifier response when the user has explicitly enabled `codexRouter.diagnostics.logRawClassifierResponses`. Keep it in the local output channel only, clearly label it as sensitive, and never persist, export, forward, or otherwise reuse it.
+- Evaluation CLI development runs may explicitly enable `--debug-logs` to retain sensitive local debugging artefacts separately from ordinary reports. Keep it off by default, filter credentials before writing, use private files in the ignored results directory, and never automatically export or forward these logs. See `evals/README.md` for the capture and retention boundaries.
 - Outcome records are opt-in. Store only the documented privacy-safe metadata and the one-way workspace identifier; do not add source paths, task text, generated output, or raw protocol data.
 - Preserve Codex approval and sandbox behaviour. Do not weaken safety controls to improve the apparent success rate.
 

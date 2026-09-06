@@ -7,6 +7,8 @@ export interface ModelDeckConfig {
   routerModel?: string;
   timeoutMs: number;
   proxyMaxTokens?: number;
+  /** Evaluation CLI only: opt-in sensitive diagnostics, never configured by the extension. */
+  evaluationDebug?: (event: string, detail: unknown) => void;
 }
 
 interface ModelDeckModel {
@@ -235,10 +237,18 @@ export class ModelDeckProvider {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
     try {
+      this.config.evaluationDebug?.("request", { path, method: init.method, body: typeof init.body === "string" ? JSON.parse(init.body) : undefined });
       const response = await fetch(`${this.config.baseUrl.replace(/\/$/, "")}/${path}`, { ...init, signal: controller.signal });
+      if (this.config.evaluationDebug) {
+        const text = await response.clone().text();
+        let body: unknown = text;
+        try { body = JSON.parse(text); } catch { /* Retain malformed bodies for development diagnostics. */ }
+        this.config.evaluationDebug("response", { path, status: response.status, body });
+      }
       if (!response.ok) throw new Error(`ModelDeck request failed with HTTP ${response.status}.`);
       return response;
     } catch (error) {
+      this.config.evaluationDebug?.("error", { path, message: controller.signal.aborted ? "ModelDeck request timed out." : error instanceof Error ? error.message : "Unknown ModelDeck failure." });
       if (controller.signal.aborted) throw new Error("ModelDeck request timed out.");
       throw error;
     } finally {

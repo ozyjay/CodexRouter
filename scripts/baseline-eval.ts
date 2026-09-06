@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
+import { EvaluationDebugLog, runDebugCommand } from "./evaluation-debug";
 import { CodexAppServer, isChatGPTAuthentication } from "../src/appServer";
 import { ModelDeckProvider, ModelDeckRouteIdentity, ProxyCandidateError, SimulationSelectorRecommendation } from "../src/modelDeck";
 import { EvaluationCase, EvaluationExecutionBackend, EvaluationManifest, EvaluationRunResult, EvaluationStrategy, ProxyCandidateConfig, ProxyRunMetadata, SimulationProfile, SimulationRunMetadata, SimulationScenario, buildPrompt, classifyCodexFailure, roleAgentFiles, simulationPatchForProfile, summariseEvaluationRuns, validateAllocations, validateEvaluationManifest } from "../src/evaluation";
@@ -22,6 +23,7 @@ interface Options {
   live: boolean;
   simulated: boolean;
   slmProxy: boolean;
+  debugLogs?: boolean;
   manifestPath: string;
   resultsDirectory: string;
   ref: string;
@@ -54,81 +56,91 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (options.live) {
-    const server = new CodexAppServer();
-    try {
-      const status = await server.start();
-      if (!isChatGPTAuthentication(status.authMethod)) throw new Error("Live baseline evaluation requires existing ChatGPT authentication.");
-      const allocationErrors = validateAllocations(manifest, status.models);
-      if (allocationErrors.length > 0) throw new Error(`Live catalogue validation failed:\n${allocationErrors.join("\n")}`);
-    } finally {
-      server.dispose();
-    }
-  }
-
-  const executionBackend: EvaluationExecutionBackend = options.simulated ? "simulated" : options.slmProxy ? "slm-proxy" : "codex";
-  const modelDeck = (executionBackend === "simulated" || executionBackend === "slm-proxy") && options.selector === "modeldeck"
-    ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, routerModel: options.modelDeckModel, timeoutMs: options.selectorTimeoutMs })
-    : undefined;
-  const proxyProvider = executionBackend === "slm-proxy"
-    ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, timeoutMs: options.proxyTimeoutMs, proxyMaxTokens: options.proxyMaxTokens })
-    : undefined;
-  const capabilityRouteIds = executionBackend === "slm-proxy" ? capabilityRouteIdsFor(options) : [];
-  const capabilitySnapshot = proxyProvider ? await proxyProvider.snapshotRoutes(capabilityRouteIds) : undefined;
-  const proxyReadiness = proxyProvider
-    ? await proxyProvider.waitForReadyModels(proxyModelsForReadiness(selectedCases, options.proxyModels), { timeoutMs: options.proxyReadyTimeoutMs, pollIntervalMs: 2_000, consecutiveReadyChecks: 2 })
-    : undefined;
-  if (proxyProvider && capabilitySnapshot) await assertCapabilitySnapshot(proxyProvider, capabilityRouteIds, capabilitySnapshot);
-  const strategies = strategiesForExecutionBackend(executionBackend);
-  const runs: EvaluationRunResult[] = [];
-  for (const evaluationCase of selectedCases) {
-    for (let iteration = 1; iteration <= options.iterations; iteration++) {
-      for (const strategy of strategies) {
-        if (proxyProvider && capabilitySnapshot) await assertCapabilitySnapshot(proxyProvider, capabilityRouteIds, capabilitySnapshot);
-        runs.push(await runEvaluation(manifest, evaluationCase, strategy, resolvedRef, iteration, executionBackend, options.selector, modelDeck, proxyProvider, options.proxyModels, options.proxyReadyTimeoutMs, options.proxyMaxTokens, options.proxyTokenBudgets));
-        if (proxyProvider && capabilitySnapshot) await assertCapabilitySnapshot(proxyProvider, capabilityRouteIds, capabilitySnapshot);
+  const debug = options.debugLogs ? new EvaluationDebugLog(options.resultsDirectory) : undefined;
+  if (debug) process.stderr.write(`Sensitive development logging enabled: ${debug.path}\n`);
+  debug?.write("cohort.start", { ref: resolvedRef, live: options.live, simulated: options.simulated, slmProxy: options.slmProxy });
+  try {
+    if (options.live) {
+      const server = new CodexAppServer();
+      try {
+        const status = await server.start();
+        if (!isChatGPTAuthentication(status.authMethod)) throw new Error("Live baseline evaluation requires existing ChatGPT authentication.");
+        const allocationErrors = validateAllocations(manifest, status.models);
+        if (allocationErrors.length > 0) throw new Error(`Live catalogue validation failed:\n${allocationErrors.join("\n")}`);
+      } finally {
+        server.dispose();
       }
     }
-  }
-  const report = {
-    version: 10,
-    generatedAt: new Date().toISOString(),
-    requestedRef: options.ref,
-    ref: resolvedRef,
-    executionBackend,
-    simulation: executionBackend === "simulated" ? {
-      purpose: "Validate evaluation-harness isolation, quality gates, reporting, and failure accounting without a Codex turn.",
-      allocationAttribution: "none",
-      performanceAttribution: "none",
-      selector: options.selector === "modeldeck" ? { kind: "modeldeck", publicModelId: options.modelDeckModel } : { kind: "deterministic" }
-    } : undefined,
-    proxy: executionBackend === "slm-proxy" ? {
-      purpose: "Exercise one constrained local proxy-generated patch candidate per case iteration against the ordinary evaluation gates without a Codex turn.",
-      allocationAttribution: "none",
-      performanceAttribution: "local-proxy-only",
-      selector: options.selector === "modeldeck" ? { kind: "modeldeck", publicModelId: options.modelDeckModel } : { kind: "deterministic" },
-      proxyMaxTokens: options.proxyMaxTokens,
-      proxyTokenBudgets: options.proxyTokenBudgets,
-      readinessPreflight: proxyReadiness ? {
-        ...proxyReadiness,
-        timeoutMs: options.proxyReadyTimeoutMs,
-        pollIntervalMs: 2_000
+
+    const executionBackend: EvaluationExecutionBackend = options.simulated ? "simulated" : options.slmProxy ? "slm-proxy" : "codex";
+    const modelDeck = (executionBackend === "simulated" || executionBackend === "slm-proxy") && options.selector === "modeldeck"
+      ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, routerModel: options.modelDeckModel, timeoutMs: options.selectorTimeoutMs, evaluationDebug: debug ? (event, detail) => debug.write(`selector.${event}`, detail) : undefined })
+      : undefined;
+    const proxyProvider = executionBackend === "slm-proxy"
+      ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, timeoutMs: options.proxyTimeoutMs, proxyMaxTokens: options.proxyMaxTokens, evaluationDebug: debug ? (event, detail) => debug.write(`proxy.${event}`, detail) : undefined })
+      : undefined;
+    const capabilityRouteIds = executionBackend === "slm-proxy" ? capabilityRouteIdsFor(options) : [];
+    const capabilitySnapshot = proxyProvider ? await proxyProvider.snapshotRoutes(capabilityRouteIds) : undefined;
+    const proxyReadiness = proxyProvider
+      ? await proxyProvider.waitForReadyModels(proxyModelsForReadiness(selectedCases, options.proxyModels), { timeoutMs: options.proxyReadyTimeoutMs, pollIntervalMs: 2_000, consecutiveReadyChecks: 2 })
+      : undefined;
+    if (proxyProvider && capabilitySnapshot) await assertCapabilitySnapshot(proxyProvider, capabilityRouteIds, capabilitySnapshot);
+    const strategies = strategiesForExecutionBackend(executionBackend);
+    const runs: EvaluationRunResult[] = [];
+    for (const evaluationCase of selectedCases) {
+      for (let iteration = 1; iteration <= options.iterations; iteration++) {
+        for (const strategy of strategies) {
+          if (proxyProvider && capabilitySnapshot) await assertCapabilitySnapshot(proxyProvider, capabilityRouteIds, capabilitySnapshot);
+          runs.push(await runEvaluation(manifest, evaluationCase, strategy, resolvedRef, iteration, executionBackend, options.selector, modelDeck, proxyProvider, options.proxyModels, options.proxyReadyTimeoutMs, options.proxyMaxTokens, options.proxyTokenBudgets, debug));
+          if (proxyProvider && capabilitySnapshot) await assertCapabilitySnapshot(proxyProvider, capabilityRouteIds, capabilitySnapshot);
+        }
+      }
+    }
+    const report = {
+      version: 10,
+      generatedAt: new Date().toISOString(),
+      requestedRef: options.ref,
+      ref: resolvedRef,
+      executionBackend,
+      simulation: executionBackend === "simulated" ? {
+        purpose: "Validate evaluation-harness isolation, quality gates, reporting, and failure accounting without a Codex turn.",
+        allocationAttribution: "none",
+        performanceAttribution: "none",
+        selector: options.selector === "modeldeck" ? { kind: "modeldeck", publicModelId: options.modelDeckModel } : { kind: "deterministic" }
       } : undefined,
-      profileModels: options.proxyModels,
-      capabilitySnapshot
-    } : undefined,
-    runs,
-    summary: summariseEvaluationRuns(runs)
-  };
-  await fs.mkdir(options.resultsDirectory, { recursive: true });
-  const resultPath = join(options.resultsDirectory, `baseline-${report.generatedAt.replace(/[:.]/g, "-")}.json`);
-  await fs.writeFile(resultPath, `${JSON.stringify(report, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  process.stdout.write(`${JSON.stringify({ resultPath, executionBackend, summary: report.summary }, null, 2)}\n`);
+      proxy: executionBackend === "slm-proxy" ? {
+        purpose: "Exercise one constrained local proxy-generated patch candidate per case iteration against the ordinary evaluation gates without a Codex turn.",
+        allocationAttribution: "none",
+        performanceAttribution: "local-proxy-only",
+        selector: options.selector === "modeldeck" ? { kind: "modeldeck", publicModelId: options.modelDeckModel } : { kind: "deterministic" },
+        proxyMaxTokens: options.proxyMaxTokens,
+        proxyTokenBudgets: options.proxyTokenBudgets,
+        readinessPreflight: proxyReadiness ? {
+          ...proxyReadiness,
+          timeoutMs: options.proxyReadyTimeoutMs,
+          pollIntervalMs: 2_000
+        } : undefined,
+        profileModels: options.proxyModels,
+        capabilitySnapshot
+      } : undefined,
+      runs,
+      summary: summariseEvaluationRuns(runs)
+    };
+    await fs.mkdir(options.resultsDirectory, { recursive: true });
+    const resultPath = join(options.resultsDirectory, `baseline-${report.generatedAt.replace(/[:.]/g, "-")}.json`);
+    await fs.writeFile(resultPath, `${JSON.stringify(report, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+    process.stdout.write(`${JSON.stringify({ resultPath, executionBackend, summary: report.summary }, null, 2)}\n`);
+    debug?.write("cohort.finished", { resultPath, summary: report.summary });
+  } catch (error) {
+    debug?.write("cohort.error", error instanceof Error ? error.message : "Unknown evaluation failure.");
+    throw error;
+  }
 }
 
-async function runEvaluation(manifest: EvaluationManifest, evaluationCase: EvaluationCase, strategy: EvaluationStrategy, ref: string, iteration: number, executionBackend: EvaluationExecutionBackend, selectorKind: SimulationSelectorKind, selector?: SimulationSelector, proxyProvider?: ModelDeckProvider, proxyModels?: Record<SimulationProfile, string>, proxyReadyTimeoutMs?: number, proxyMaxTokens?: number, proxyTokenBudgets?: Record<SimulationProfile, number>): Promise<EvaluationRunResult> {
+async function runEvaluation(manifest: EvaluationManifest, evaluationCase: EvaluationCase, strategy: EvaluationStrategy, ref: string, iteration: number, executionBackend: EvaluationExecutionBackend, selectorKind: SimulationSelectorKind, selector?: SimulationSelector, proxyProvider?: ModelDeckProvider, proxyModels?: Record<SimulationProfile, string>, proxyReadyTimeoutMs?: number, proxyMaxTokens?: number, proxyTokenBudgets?: Record<SimulationProfile, number>, debug?: EvaluationDebugLog): Promise<EvaluationRunResult> {
   const directory = await mkdtemp(join(tmpdir(), "codex-router-baseline-"));
   try {
+    debug?.write("trial.start", { caseId: evaluationCase.id, strategy, iteration, executionBackend, prompt: buildPrompt(strategy, evaluationCase) });
     await run("git", ["worktree", "add", "--detach", directory, ref]);
     if (strategy === "fixed-roles") {
       const agentsDirectory = join(directory, ".codex", "agents");
@@ -140,15 +152,17 @@ async function runEvaluation(manifest: EvaluationManifest, evaluationCase: Evalu
     const simulation = executionBackend === "simulated" || executionBackend === "slm-proxy" ? await resolveSimulation(evaluationCase, selectorKind, selector) : undefined;
     let proxy: ProxyRunMetadata | undefined;
     const execution = executionBackend === "codex"
-      ? await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", buildPrompt(strategy, evaluationCase)])
+      ? await runCodex(["exec", "--ephemeral", "-C", directory, "-m", allocation.model, "-c", `model_reasoning_effort=${JSON.stringify(allocation.effort)}`, "-s", "workspace-write", buildPrompt(strategy, evaluationCase)], debug)
       : executionBackend === "simulated"
         ? await runSimulation(directory, simulation?.patch)
         : await runProxyCandidate(directory, evaluationCase, simulation!, proxyProvider!, proxyModels!, proxyReadyTimeoutMs!, proxyMaxTokens!, proxyTokenBudgets!, (metadata) => { proxy = metadata; });
     const executionExitCode = execution.exitCode;
-    const validationExitCode = executionExitCode === 0 ? await runValidation(directory, evaluationCase) : null;
+    const validationExitCode = executionExitCode === 0 ? await runValidation(directory, evaluationCase, debug) : null;
     const expectationPassed = executionExitCode === 0 ? await matchesExpectation(directory, evaluationCase) : null;
     const changedFiles = (await run("git", ["-C", directory, "diff", "--quiet"], { allowNonZero: true, suppressOutput: true })) !== 0;
-    const mutationKilled = executionExitCode === 0 && validationExitCode === 0 && expectationPassed !== false ? await runMutationCheck(directory, evaluationCase) : null;
+    if (debug) await runDebugCommand("git", ["diff", "--no-ext-diff", "--no-textconv", "--"], debug, "patch", directory);
+    const mutationKilled = executionExitCode === 0 && validationExitCode === 0 && expectationPassed !== false ? await runMutationCheck(directory, evaluationCase, debug) : null;
+    debug?.write("trial.finished", { caseId: evaluationCase.id, strategy, iteration, executionExitCode, validationExitCode, expectationPassed, mutationKilled, changedFiles, simulation: simulation?.metadata, proxy });
     return {
       caseId: evaluationCase.id,
       iteration,
@@ -350,8 +364,9 @@ export async function readProxyContext(directory: string, constraints: ProxyCand
   return context;
 }
 
-async function runValidation(directory: string, evaluationCase: EvaluationCase): Promise<number> {
+async function runValidation(directory: string, evaluationCase: EvaluationCase, debug?: EvaluationDebugLog): Promise<number> {
   await linkInstalledDependencies(directory);
+  if (debug) return (await runDebugCommand(evaluationCase.validation.command, evaluationCase.validation.args, debug, "validation", directory)).exitCode;
   return run(evaluationCase.validation.command, evaluationCase.validation.args, { cwd: directory, allowNonZero: true, suppressOutput: true });
 }
 
@@ -379,7 +394,7 @@ async function matchesExpectation(directory: string, evaluationCase: EvaluationC
   return true;
 }
 
-export async function runMutationCheck(directory: string, evaluationCase: EvaluationCase): Promise<boolean | null> {
+export async function runMutationCheck(directory: string, evaluationCase: EvaluationCase, debug?: EvaluationDebugLog): Promise<boolean | null> {
   if (!evaluationCase.mutation) return null;
   const target = resolve(directory, evaluationCase.mutation.file);
   if (relative(directory, target).startsWith("..")) return false;
@@ -389,10 +404,14 @@ export async function runMutationCheck(directory: string, evaluationCase: Evalua
   } catch {
     return false;
   }
-  if (!original.includes(evaluationCase.mutation.search)) return false;
+  if (!original.includes(evaluationCase.mutation.search)) {
+    debug?.write("mutation.not-applied", { reason: "search-not-found", file: evaluationCase.mutation.file });
+    return false;
+  }
   const mutated = original.replace(evaluationCase.mutation.search, evaluationCase.mutation.replacement);
   try {
     await fs.writeFile(target, mutated, "utf8");
+    if (debug) return (await runDebugCommand(evaluationCase.mutation.validation.command, evaluationCase.mutation.validation.args, debug, "mutation.validation", directory)).exitCode !== 0;
     return (await run(evaluationCase.mutation.validation.command, evaluationCase.mutation.validation.args, { cwd: directory, allowNonZero: true, suppressOutput: true })) !== 0;
   } finally {
     await fs.writeFile(target, original, "utf8");
@@ -431,7 +450,8 @@ export async function runSimulation(directory: string, scenario?: SimulationScen
   }
 }
 
-async function runCodex(args: string[]): Promise<{ exitCode: number; stderr: string }> {
+async function runCodex(args: string[], debug?: EvaluationDebugLog): Promise<{ exitCode: number; stderr: string }> {
+  if (debug) return runDebugCommand("codex", args, debug, "codex");
   return new Promise((resolvePromise, reject) => {
     const child = spawn("codex", args, { shell: false, stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
@@ -479,13 +499,14 @@ async function run(command: string, args: string[], options: { cwd?: string; all
   });
 }
 
-function parseArguments(argumentsList: string[]): Options {
+export function parseArguments(argumentsList: string[]): Options {
   const options: Options = { live: false, simulated: false, slmProxy: false, manifestPath: resolve("evals/baseline-manifest.json"), resultsDirectory: resolve("evals/results"), ref: "HEAD", iterations: 1, selector: "deterministic", modelDeckBaseUrl: "http://127.0.0.1:8600/v1", modelDeckModel: "codex-router-simulation-selector", selectorTimeoutMs: 15_000, proxyTimeoutMs: 180_000, proxyReadyTimeoutMs: 60_000, proxyMaxTokens: 2_048, proxyTokenBudgets: { "sim-small": 256, "sim-balanced": 256, "sim-strong": 2_048 }, proxyModels: { "sim-small": "codex-router-proxy-small", "sim-balanced": "codex-router-proxy-balanced", "sim-strong": "codex-router-proxy-strong" } };
   for (let index = 0; index < argumentsList.length; index++) {
     const argument = argumentsList[index];
     if (argument === "--live") options.live = true;
     else if (argument === "--simulated") options.simulated = true;
     else if (argument === "--slm-proxy") options.slmProxy = true;
+    else if (argument === "--debug-logs") options.debugLogs = true;
     else if (argument === "--manifest") options.manifestPath = resolve(requiredValue(argumentsList, ++index, argument));
     else if (argument === "--results-dir") options.resultsDirectory = resolve(requiredValue(argumentsList, ++index, argument));
     else if (argument === "--ref") options.ref = requiredValue(argumentsList, ++index, argument);

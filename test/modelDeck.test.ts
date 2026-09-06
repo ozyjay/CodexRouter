@@ -2,6 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ModelDeckClassifierError, ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl, assertModelDeckModelId, classifyModelDeckFailure, modelDeckFailureDiagnostic, modelDeckRawFailureResponse } from "../src/modelDeck";
 
+test("evaluation diagnostics retain malformed proxy responses before rejection without headers", async () => {
+  const originalFetch = globalThis.fetch;
+  const events: Array<{ event: string; detail: unknown }> = [];
+  globalThis.fetch = (async (url) => String(url).endsWith("/models")
+    ? new Response(JSON.stringify({ data: [{ id: "proxy", ready: true }] }))
+    : new Response("malformed candidate", { headers: { "set-cookie": "synthetic-cookie" } })) as typeof fetch;
+  try {
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000, evaluationDebug: (event, detail) => events.push({ event, detail }) });
+    await assert.rejects(provider.generateProxyCandidate("proxy", { task: "Add a test", allowedFiles: ["test.ts"], context: [{ file: "test.ts", content: "existing test" }], maxPatches: 1 }));
+    const content = JSON.stringify(events);
+    assert.match(content, /malformed candidate/);
+    assert.match(content, /existing test/);
+    assert.equal(content.includes("synthetic-cookie"), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("ModelDeck provider rejects non-loopback endpoints", () => {
   assert.throws(() => assertLoopbackUrl("https://example.com/v1"), /loopback/);
 });
