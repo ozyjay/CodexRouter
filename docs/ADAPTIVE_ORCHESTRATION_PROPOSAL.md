@@ -46,6 +46,7 @@ Each provider integration must:
 - use a literal loopback HTTP(S) endpoint only;
 - discover or explicitly configure its local classifier model without assuming provider-specific model identifiers;
 - use a compact, schema-constrained prompt and strictly validate the returned recommendation;
+- supply the current visible App Server model/effort combinations to the classifier and validate the selected pair against that same catalogue;
 - enforce bounded timeouts and show the active provider and any failure clearly; and
 - fall back to deterministic local rules without any cloud-routing request.
 

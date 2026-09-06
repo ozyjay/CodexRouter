@@ -129,6 +129,11 @@
           "maximum": 30000,
           "description": "Maximum time to wait for a local routing-model response."
         },
+        "codexRouter.diagnostics.developmentLogs": {
+          "type": "boolean",
+          "default": false,
+          "description": "Development only: retain sensitive sidebar and command task logs in the extension log directory. Includes task content, classifier responses and displayed Codex output with best-effort credential redaction. Delete logs when debugging is finished."
+        },
         "codexRouter.diagnostics.logRawClassifierResponses": {
           "type": "boolean",
           "default": false,

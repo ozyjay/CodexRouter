@@ -104,6 +104,7 @@ If something does not start, run **Codex Router: Show Diagnostics** from the Com
 | `codexRouter.modelDeck.proxyTimeoutMs` | `120000` | Timeout for an explicitly requested local proxy candidate. |
 | `codexRouter.modelDeck.proxyMaxTokens` | `2048` | Maximum local proxy-candidate output budget. |
 | `codexRouter.requestTimeoutMs` | `5000` | Experimental local-classifier timeout. |
+| `codexRouter.diagnostics.developmentLogs` | `false` | Retains sensitive sidebar and command-task development logs under the extension log directory. Enabled in this repository's workspace settings for development. |
 | `codexRouter.diagnostics.logRawClassifierResponses` | `false` | Debug only: writes rejected local-classifier responses to the local Codex Router output channel. Responses may contain sensitive task content. |
 | `codexRouter.analytics.enabled` | `false` | Enables local outcome records. |
 
@@ -113,7 +114,17 @@ During a streamed Codex response, the sidebar displays an estimated `tok/s` rate
 
 ModelDeck classification is not contacted under the default policy. The proxy command contacts ModelDeck only after its separate disclosure confirmation, regardless of the routing-provider setting. An unavailable, timed-out, malformed, non-loopback, out-of-scope, or inapplicable proxy result fails closed; it is never applied and never replaced with a generated fallback. An experimental classifier failure instead falls back visibly to the deterministic policy without a cloud-routing request. For classifier failures, the Codex Router output channel records a privacy-safe rejection category (for example, JSON parsing or contract validation). To inspect the full rejected response during local debugging, explicitly enable `codexRouter.diagnostics.logRawClassifierResponses`; it is disabled by default because the response may contain sensitive task content.
 
+### Sidebar development logs
+
+Set `codexRouter.diagnostics.developmentLogs` to `true` to record the next sidebar or command-palette task. This repository's `.vscode/settings.json` enables it for current development. After rebuilding, restart the Extension Development Host so it loads the new code, with this workspace open. The **Codex Router** Output channel prints the exact file path at the start of each session: `<extension log directory>/debug/run-*/events.jsonl`. The extension log directory is provided by VS Code and can change between host sessions.
+
+The file records task input, classifier requests and responses (including unsupported allocations), the live catalogue, recommendations, approval or override, the execution prompt, displayed output, and final state. Ordinary Output diagnostics contain operational metadata only. Detailed files contain sensitive task/source/model content and use best-effort credential redaction and owner-only file permissions on POSIX. They exclude HTTP headers, authentication files, environment dumps, and raw App Server traffic; they do not capture a complete transcript of Codex tool execution. Logging failures are reported without stopping the task.
+
+These logs are separate from evaluation CLI logs and opt-in outcome records. They are never automatically exported. Delete the relevant `run-*` directory after debugging and set the preference to `false` to stop future capture; VS Code may also clean up its log directories. For another workspace, explicitly enable the preference there. If `unsupported-allocation` recurs, inspect `routing.allocation-rejected` for `model-not-advertised`, `model-hidden`, or `effort-not-supported`, then compare the rejected pair with `catalogue.received` and the detailed `classifier.response` event. The original discarded response cannot be recovered.
+
 ## Routing policy
+
+The experimental classifier receives the live App Server catalogue as compact `availableModels` metadata: visible model IDs, their supported efforts, and advertised defaults. It must select an exact supported pair. Unknown models, hidden models, and unsupported efforts still trigger deterministic fallback. The Output channel identifies the rejected pair and the specific rejection reason; it also records the available choices, accepted configuration, and final session state. A supported model is preserved even when its name is outside the familiar Luna/Terra/Sol tiers, unless the existing safety guardrails require escalation. This catalogue-aware policy is recorded as `modeldeck-experimental-v2+deterministic-v1-guardrails`.
 
 The deterministic policy assesses scope, ambiguity, exploration, architectural judgement, reversibility, blast radius, verification burden, consequential risk, and whether work is bounded and repeatable. Recommendations use ordinal `weak`, `moderate`, or `strong` strength; these labels describe policy clarity, not a calibrated probability.
 

@@ -117,7 +117,8 @@ export function applyGuardrails(candidate: RoutingRecommendation, input: Routing
   );
   const desiredTier = guardrailEscalated ? baselineTier : candidateTier ?? "terra";
   const desiredEffort = guardrailEscalated ? baseline.recommendedEffort : candidate.recommendedEffort;
-  const selection = selectCatalogueAllocation(desiredTier, desiredEffort, models);
+  const advertised = candidate.source === "local-model" && !guardrailEscalated ? models.find((model) => !model.hidden && (model.model === candidate.recommendedModel || model.id === candidate.recommendedModel) && model.supportedReasoningEfforts.some((effort) => effort.reasoningEffort === desiredEffort)) : undefined;
+  const selection = advertised ? { model: advertised, effort: desiredEffort, fallback: undefined } : selectCatalogueAllocation(desiredTier, desiredEffort, models);
   const reasons = guardrailEscalated
     ? [`Safety guardrail retained ${baseline.assessment.riskSignals.join(", ")} risk escalation.`, ...candidate.reasons].slice(0, 3)
     : candidate.reasons.slice(0, 3);

@@ -74,10 +74,10 @@ async function main(): Promise<void> {
 
     const executionBackend: EvaluationExecutionBackend = options.simulated ? "simulated" : options.slmProxy ? "slm-proxy" : "codex";
     const modelDeck = (executionBackend === "simulated" || executionBackend === "slm-proxy") && options.selector === "modeldeck"
-      ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, routerModel: options.modelDeckModel, timeoutMs: options.selectorTimeoutMs, evaluationDebug: debug ? (event, detail) => debug.write(`selector.${event}`, detail) : undefined })
+      ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, routerModel: options.modelDeckModel, timeoutMs: options.selectorTimeoutMs, developmentDebug: debug ? (event, detail) => debug.write(`selector.${event}`, detail) : undefined })
       : undefined;
     const proxyProvider = executionBackend === "slm-proxy"
-      ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, timeoutMs: options.proxyTimeoutMs, proxyMaxTokens: options.proxyMaxTokens, evaluationDebug: debug ? (event, detail) => debug.write(`proxy.${event}`, detail) : undefined })
+      ? new ModelDeckProvider({ baseUrl: options.modelDeckBaseUrl, timeoutMs: options.proxyTimeoutMs, proxyMaxTokens: options.proxyMaxTokens, developmentDebug: debug ? (event, detail) => debug.write(`proxy.${event}`, detail) : undefined })
       : undefined;
     const capabilityRouteIds = executionBackend === "slm-proxy" ? capabilityRouteIdsFor(options) : [];
     const capabilitySnapshot = proxyProvider ? await proxyProvider.snapshotRoutes(capabilityRouteIds) : undefined;

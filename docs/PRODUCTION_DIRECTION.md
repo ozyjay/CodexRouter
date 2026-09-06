@@ -102,6 +102,8 @@ Purpose: schema-constrained task classification only
 
 Configure the extension with that public model ID. The routing model must be a small local instruction-following model that reliably returns compact JSON under a low temperature. It does not need coding-agent capability; classification consistency and low latency matter more.
 
+Supply the current App Server model IDs and their supported reasoning efforts in every classifier request. Validate the resulting pair against that catalogue and retain explicit rejection reasons in operational diagnostics. Opt-in development logs live in the extension host's log directory and contain filtered sensitive content; the webview never receives these logs.
+
 The optional selected-code workflow uses a separate coding-capable ModelDeck route:
 
 ```text

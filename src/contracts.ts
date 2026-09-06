@@ -5,7 +5,7 @@ export const REASONING_ORDER = ["none", "low", "medium", "high", "xhigh", "max",
 export type ReasoningEffort = (typeof REASONING_ORDER)[number] | string;
 
 export const ROUTING_POLICY_VERSION = "deterministic-v1";
-export const MODELDECK_POLICY_VERSION = "modeldeck-experimental-v1+deterministic-v1-guardrails";
+export const MODELDECK_POLICY_VERSION = "modeldeck-experimental-v2+deterministic-v1-guardrails";
 export const OUTCOME_SCHEMA_VERSION = 2;
 
 export type RecommendationStrength = "weak" | "moderate" | "strong";

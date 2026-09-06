@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { CodexAppServer, isChatGPTAuthentication } from "./appServer";
 import { AllocationSelection, CodexModel, OUTCOME_SCHEMA_VERSION, ReasoningEffort, RoutingInput, RoutingProvider, RoutingRecommendation, RoutingSessionInput, TurnState } from "./contracts";
-import { ModelDeckProvider, ProxyCandidateError, assertModelDeckModelId, classifyModelDeckFailure } from "./modelDeck";
+import { ModelDeckProvider, ProxyCandidateError, assertModelDeckModelId, classifierCatalogue, classifyModelDeckFailure } from "./modelDeck";
 import { OutcomeStore, renderOutcomeMarkdown } from "./outcomes";
 import { recommendWithProvider } from "./policy";
 import { prepareSelectionProxyCandidate, renderProxyCandidateMarkdown } from "./proxy";
 import { RoutingSessionController } from "./session";
 import { StreamTokenEstimator, StreamThroughput } from "./streamMetrics";
+import { RoutingDiagnostics, diagnosticIdentifier } from "./routingDiagnostics";
 
 let appServer: CodexAppServer | undefined;
 let activeSession: RoutingSessionController | undefined;
@@ -206,10 +207,15 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
   let turnState: TurnState | undefined;
   let outcomeRecorded = false;
   let cancellationDisposable: vscode.Disposable | undefined;
+  const diagnostics = new RoutingDiagnostics(vscode.workspace.getConfiguration("codexRouter").get<boolean>("diagnostics.developmentLogs", false), context.logUri.fsPath, (message) => output.appendLine(message));
+  const originalSink = sink;
+  sink = { ...originalSink, text: (message) => { diagnostics.delta(message); originalSink.text(message); } };
   try {
+    diagnostics.sensitive("session.input", input);
     sink.progress("Checking ChatGPT-authenticated Codex and available models…");
     const server = await getServer();
     const status = await server.start();
+    diagnostics.record("catalogue.received", { models: classifierCatalogue(status.models) });
     if (!isChatGPTAuthentication(status.authMethod)) {
       setStatus("auth-required");
       sink.text("Codex Router only submits through ChatGPT-authenticated Codex. Run `codex logout`, then `codex login`, and verify with `codex login status`.");
@@ -217,17 +223,25 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
     }
     if (!status.models.length) throw new Error("Codex App Server reported no available models.");
 
-    session = new RoutingSessionController(input, (routingInput, models) => route(routingInput, models), {
-      execute: (prompt, selection, signal) => executeTurn(server, prompt, selection, signal, sink)
+    session = new RoutingSessionController(input, (routingInput, models) => route(routingInput, models, diagnostics), {
+      execute: (prompt, selection, signal) => {
+        diagnostics.sensitive("codex.prompt", prompt);
+        return executeTurn(server, prompt, selection, signal, sink);
+      }
     });
     const summaries = session.contextSummary();
     sink.text(`**Context preview**\n\nRouting: ${summaries.routing}.\n\nCodex execution: ${summaries.execution}.\n\n`);
     const recommendation = await session.analyse(status.models);
+    diagnostics.record("routing.recommended", { model: recommendation.recommendedModel, effort: recommendation.recommendedEffort, source: recommendation.source, providerFallback: recommendation.providerFallback, catalogueFallback: recommendation.catalogueFallback });
     session.awaitApproval();
     sink.activity?.("awaiting-approval", "Choose the recommended configuration or set an override to start Codex.");
     sink.text(formatRecommendation(recommendation, summaries.routing, summaries.execution));
     const choice = await (sink.chooseConfiguration ?? chooseConfiguration)(session, recommendation, status.models);
-    if (!choice) return;
+    if (!choice) {
+      diagnostics.record("approval.dismissed", {});
+      return;
+    }
+    diagnostics.record("approval.accepted", choice);
 
     sink.progress(`Starting Codex with ${choice.model} / ${choice.effort}…`);
     sink.activity?.("starting", `Starting Codex with ${choice.model} / ${choice.effort}…`);
@@ -236,6 +250,7 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
     cancellationDisposable = sink.onCancellationRequested?.(() => session?.cancel());
     startedAt = Date.now();
     turnState = await session.execute();
+    diagnostics.record("turn.finished", { state: turnState, durationMs: Date.now() - startedAt });
     sink.text(turnState === "completed" ? "\n\nCodex turn completed.\n" : turnState === "cancelled" ? "\n\nCodex turn cancelled.\n" : "\n\nCodex turn failed.\n");
     setStatus("ready", choice.model, choice.effort);
     outcomeRecorded = true;
@@ -243,6 +258,8 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
   } catch (error) {
     const cancelled = session?.state === "cancelled";
     const message = error instanceof Error ? error.message : "Unexpected routing error.";
+    diagnostics.record("session.error", { cancelled });
+    diagnostics.sensitive("session.error.detail", message);
     output.appendLine(`[error] ${message}`);
     sink.text(cancelled ? "Codex Router cancelled the active turn." : `Codex Router could not complete the task: ${message}`);
     setStatus(cancelled ? "ready" : "error");
@@ -252,28 +269,32 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
       await safeRecordOutcome(context, session.recommendation, session.selection, Date.now() - startedAt, turnState, input.execution.localProxyCandidate?.model);
     }
   } finally {
+    diagnostics.finish(turnState ?? session?.state ?? "not-started");
     cancellationDisposable?.dispose();
     if (activeSession === session) activeSession = undefined;
     sink.finish?.();
   }
 }
 
-async function route(input: RoutingInput, models: CodexModel[]): Promise<RoutingRecommendation> {
+async function route(input: RoutingInput, models: CodexModel[], diagnostics: RoutingDiagnostics): Promise<RoutingRecommendation> {
   const configuration = vscode.workspace.getConfiguration("codexRouter");
   const provider = configuration.get<RoutingProvider>("routing.provider", "deterministic");
   const logRawClassifierResponses = configuration.get<boolean>("diagnostics.logRawClassifierResponses", false);
+  diagnostics.record("routing.started", { provider });
   return recommendWithProvider(input, models, provider, () => new ModelDeckProvider({
       baseUrl: configuration.get<string>("modelDeck.baseUrl", "http://127.0.0.1:8600/v1"),
       routerModel: configuration.get<string>("modelDeck.routerModel", "") || undefined,
-      timeoutMs: configuration.get<number>("requestTimeoutMs", 5_000)
+      timeoutMs: configuration.get<number>("requestTimeoutMs", 5_000),
+      developmentDebug: configuration.get<boolean>("diagnostics.developmentLogs", false) ? (event, detail) => diagnostics.sensitive(`classifier.${event}`, detail) : undefined
     }), (fallback, diagnostic, rawResponse) => {
+      diagnostics.record("routing.fallback", { fallback, diagnostic });
       output.appendLine(`[router fallback] ${fallback}${diagnostic ? ` (${diagnostic})` : ""}`);
       if (logRawClassifierResponses && rawResponse !== undefined) {
         output.appendLine("[router classifier raw response — sensitive diagnostic output]");
         output.appendLine(rawResponse);
         output.appendLine("[end router classifier raw response]");
       }
-    });
+    }, (rejection) => diagnostics.record("routing.allocation-rejected", { ...rejection, requestedModel: diagnosticIdentifier(rejection.requestedModel), requestedEffort: diagnosticIdentifier(rejection.requestedEffort) }));
 }
 
 async function chooseConfiguration(session: RoutingSessionController, recommendation: RoutingRecommendation, models: CodexModel[]): Promise<AllocationSelection | undefined> {

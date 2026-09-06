@@ -1,4 +1,4 @@
-import { MODELDECK_POLICY_VERSION, ProviderFallback, RoutingInput, RoutingRecommendation } from "./contracts";
+import { CodexModel, MODELDECK_POLICY_VERSION, ProviderFallback, RoutingInput, RoutingRecommendation } from "./contracts";
 import { SimulationProfile } from "./evaluation";
 import { fallbackRoute, isValidRecommendation } from "./routing";
 
@@ -7,8 +7,8 @@ export interface ModelDeckConfig {
   routerModel?: string;
   timeoutMs: number;
   proxyMaxTokens?: number;
-  /** Evaluation CLI only: opt-in sensitive diagnostics, never configured by the extension. */
-  evaluationDebug?: (event: string, detail: unknown) => void;
+  /** Opt-in sensitive diagnostics; the caller must filter credentials before persistence. */
+  developmentDebug?: (event: string, detail: unknown) => void;
 }
 
 interface ModelDeckModel {
@@ -120,7 +120,7 @@ export class ModelDeckProvider {
     }
   }
 
-  async classify(input: RoutingInput): Promise<RoutingRecommendation> {
+  async classify(input: RoutingInput, models: readonly CodexModel[] = []): Promise<RoutingRecommendation> {
     const discovered = await this.discoverReadyModels();
     const model = this.config.routerModel || discovered[0]?.id;
     if (!model) throw new Error("ModelDeck did not report a ready local routing model.");
@@ -137,7 +137,7 @@ export class ModelDeckProvider {
         max_tokens: 512,
         messages: [
           { role: "system", content: ROUTER_PROMPT },
-          { role: "user", content: JSON.stringify(input) }
+          { role: "user", content: JSON.stringify({ ...input, availableModels: classifierCatalogue(models) }) }
         ]
       })
     });
@@ -237,18 +237,18 @@ export class ModelDeckProvider {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
     try {
-      this.config.evaluationDebug?.("request", { path, method: init.method, body: typeof init.body === "string" ? JSON.parse(init.body) : undefined });
+      this.config.developmentDebug?.("request", { path, method: init.method, body: typeof init.body === "string" ? JSON.parse(init.body) : undefined });
       const response = await fetch(`${this.config.baseUrl.replace(/\/$/, "")}/${path}`, { ...init, signal: controller.signal });
-      if (this.config.evaluationDebug) {
+      if (this.config.developmentDebug) {
         const text = await response.clone().text();
         let body: unknown = text;
         try { body = JSON.parse(text); } catch { /* Retain malformed bodies for development diagnostics. */ }
-        this.config.evaluationDebug("response", { path, status: response.status, body });
+        this.config.developmentDebug("response", { path, status: response.status, body });
       }
       if (!response.ok) throw new Error(`ModelDeck request failed with HTTP ${response.status}.`);
       return response;
     } catch (error) {
-      this.config.evaluationDebug?.("error", { path, message: controller.signal.aborted ? "ModelDeck request timed out." : error instanceof Error ? error.message : "Unknown ModelDeck failure." });
+      this.config.developmentDebug?.("error", { path, message: controller.signal.aborted ? "ModelDeck request timed out." : error instanceof Error ? error.message : "Unknown ModelDeck failure." });
       if (controller.signal.aborted) throw new Error("ModelDeck request timed out.");
       throw error;
     } finally {
@@ -273,6 +273,15 @@ export function modelDeckFailureDiagnostic(error: unknown): string | undefined {
 
 export function modelDeckRawFailureResponse(error: unknown): string | undefined {
   return error instanceof ModelDeckClassifierError ? error.rawResponse : undefined;
+}
+
+export function classifierCatalogue(models: readonly CodexModel[]): Array<{ model: string; supportedReasoningEfforts: string[]; defaultReasoningEffort: string; isDefault: boolean }> {
+  return models.filter((model) => !model.hidden && model.supportedReasoningEfforts.length > 0).map((model) => ({
+    model: model.model,
+    supportedReasoningEfforts: model.supportedReasoningEfforts.map((effort) => effort.reasoningEffort),
+    defaultReasoningEffort: model.defaultReasoningEffort,
+    isDefault: model.isDefault
+  }));
 }
 
 function wait(milliseconds: number): Promise<void> {
@@ -397,6 +406,7 @@ recommendedEffort: a reasoning effort string;
 confidence: number from 0 to 1;
 reasons: array of at most 3 concise strings, each under 240 characters;
 escalationSignals: array of at most 4 concise strings.
+Choose recommendedModel exactly from availableModels[].model and recommendedEffort from that model's supportedReasoningEfforts. Never invent a model ID or effort, use a local ModelDeck model ID, or infer availability from prior knowledge. Use task complexity and risk to choose among these advertised combinations; use the advertised default model/effort when uncertain.
 You provide advice only. Do not include source code, credentials, repository content, markdown, or prose outside the JSON object.`;
 
 const SIMULATION_SELECTOR_PROMPT = `You are a local simulation-tier selector for a deterministic evaluation harness. Return only one JSON object with exactly these fields:

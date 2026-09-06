@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { CodexModel } from "../src/contracts";
 import { ModelDeckClassifierError, ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl, assertModelDeckModelId, classifyModelDeckFailure, modelDeckFailureDiagnostic, modelDeckRawFailureResponse } from "../src/modelDeck";
 
 test("evaluation diagnostics retain malformed proxy responses before rejection without headers", async () => {
@@ -9,7 +10,7 @@ test("evaluation diagnostics retain malformed proxy responses before rejection w
     ? new Response(JSON.stringify({ data: [{ id: "proxy", ready: true }] }))
     : new Response("malformed candidate", { headers: { "set-cookie": "synthetic-cookie" } })) as typeof fetch;
   try {
-    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000, evaluationDebug: (event, detail) => events.push({ event, detail }) });
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000, developmentDebug: (event, detail) => events.push({ event, detail }) });
     await assert.rejects(provider.generateProxyCandidate("proxy", { task: "Add a test", allowedFiles: ["test.ts"], context: [{ file: "test.ts", content: "existing test" }], maxPatches: 1 }));
     const content = JSON.stringify(events);
     assert.match(content, /malformed candidate/);
@@ -111,11 +112,16 @@ test("ModelDeck classifier receives metadata but never execution source", async 
   }) as typeof fetch;
   try {
     const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
-    const recommendation = await provider.classify({ task: "Add one test.", metadata: { languageId: "typescript", selectionPresent: true, selectedCharacters: 42 } });
+    const current: CodexModel = { id: "alias", model: "gpt-current", displayName: "Private label", description: "Private description", hidden: false, supportedReasoningEfforts: [{ reasoningEffort: "adaptive", description: "Private effort description" }], defaultReasoningEffort: "adaptive", isDefault: true };
+    const recommendation = await provider.classify({ task: "Add one test.", metadata: { languageId: "typescript", selectionPresent: true, selectedCharacters: 42 } }, [current, { ...current, model: "hidden-model", hidden: true }, { ...current, model: "no-efforts", supportedReasoningEfforts: [] }]);
     assert.equal(recommendation.classifierModel, "local-router");
     assert.equal(recommendation.source, "local-model");
     assert.match(requestBody, /selectedCharacters/);
     assert.doesNotMatch(requestBody, /secret source excerpt/);
+    const messages = JSON.parse(requestBody).messages;
+    assert.deepEqual(JSON.parse(messages[1].content).availableModels, [{ model: "gpt-current", supportedReasoningEfforts: ["adaptive"], defaultReasoningEffort: "adaptive", isDefault: true }]);
+    assert.match(messages[0].content, /Choose recommendedModel exactly/);
+    assert.doesNotMatch(requestBody, /Private|hidden-model|no-efforts/);
   } finally {
     globalThis.fetch = originalFetch;
   }

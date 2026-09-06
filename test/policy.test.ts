@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CodexModel } from "../src/contracts";
-import { recommendWithProvider } from "../src/policy";
+import { allocationRejection, recommendWithProvider } from "../src/policy";
 import { fallbackRoute } from "../src/routing";
 
 const models: CodexModel[] = [
@@ -27,6 +27,35 @@ test("unsupported experimental allocations fall back visibly", async () => {
   }));
   assert.equal(route.source, "deterministic");
   assert.equal(route.providerFallback, "unsupported-allocation");
+});
+
+test("classifiers receive the current catalogue and retain valid models outside the known tiers", async () => {
+  const input = { task: "Add one test." };
+  const current = { ...models[1], id: "current-id", model: "gpt-current", supportedReasoningEfforts: [{ reasoningEffort: "adaptive" }] };
+  const catalogue = [...models, current];
+  const route = await recommendWithProvider(input, catalogue, "modeldeck-experimental", () => ({
+    classify: async (received, available) => {
+      assert.deepEqual(received, input);
+      assert.deepEqual(available, catalogue);
+      return { ...fallbackRoute(input), source: "local-model", recommendedModel: current.id, recommendedEffort: "adaptive" };
+    }
+  }));
+  assert.equal(route.recommendedModel, "gpt-current");
+  assert.equal(route.recommendedEffort, "adaptive");
+  assert.equal(route.providerFallback, undefined);
+});
+
+test("allocation rejections distinguish unknown models, hidden models and unsupported efforts", async () => {
+  const baseline = fallbackRoute({ task: "Add one test." });
+  assert.equal(allocationRejection({ ...baseline, recommendedModel: "missing" }, models)?.reason, "model-not-advertised");
+  assert.equal(allocationRejection(baseline, models.map((model) => ({ ...model, hidden: true })))?.reason, "model-hidden");
+  const diagnostics: unknown[] = [];
+  const route = await recommendWithProvider({ task: "Add one test." }, models, "modeldeck-experimental", () => ({
+    classify: async () => ({ ...baseline, recommendedModel: "terra", recommendedEffort: "ultra" })
+  }), undefined, (detail) => diagnostics.push(detail));
+  assert.deepEqual(diagnostics, [{ reason: "effort-not-supported", requestedModel: "terra", requestedEffort: "ultra", supportedEfforts: ["medium"] }]);
+  assert.equal(route.providerFallback, "unsupported-allocation");
+  assert.equal(route.source, "deterministic");
 });
 
 test("experimental classifiers cannot weaken deterministic safety guardrails", async () => {
