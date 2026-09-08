@@ -1,6 +1,7 @@
 {
   "name": "codex-router",
   "displayName": "Codex Router",
+  "publisher": "codex-router-local",
   "description": "Local, privacy-preserving routing for ChatGPT-authenticated Codex tasks.",
   "version": "0.1.0",
   "private": true,
@@ -149,6 +150,7 @@
   },
   "scripts": {
     "compile": "pwsh -NoProfile -File scripts/invoke.ps1 compile",
+    "package": "pwsh -NoProfile -File scripts/invoke.ps1 package",
     "watch": "pwsh -NoProfile -File scripts/invoke.ps1 watch",
     "test": "pwsh -NoProfile -File scripts/invoke.ps1 test",
     "check:baseline": "pwsh -NoProfile -File scripts/invoke.ps1 check-baseline",
@@ -159,6 +161,7 @@
   "devDependencies": {
     "@types/node": "^22.15.3",
     "@types/vscode": "^1.134.0",
+    "@vscode/vsce": "^3.9.2",
     "tsx": "^4.19.3",
     "typescript": "^5.8.3"
   }

@@ -1,0 +1,6 @@
+# Only ship runtime files and the extension overview. Keep local logs and evals out.
+**
+!package.json
+!README.md
+!dist/**/*.js
+!media/codex-router.svg

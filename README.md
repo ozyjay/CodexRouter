@@ -87,6 +87,22 @@ Use **Codex Router: Send Selection to Codex Router** from an editor selection to
 
 To use a ModelDeck coding route as an adviser, select up to 12,000 characters and run **Codex Router: Generate ModelDeck Proxy Candidate for Selection**. Confirm the limited context disclosure, review the candidate preview, then optionally choose **Route candidate through Codex**. Dismissing the action leaves the workspace unchanged and does not start a Codex turn.
 
+### Package and install locally
+
+From the repository root, create an installable VSIX:
+
+```powershell
+npm ci
+npm run package
+code --install-extension ./codex-router-0.1.0.vsix
+```
+
+`npm run package` compiles the extension, then uses the project's local `@vscode/vsce` dependency to create `codex-router-<version>.vsix` in the repository root. The version comes from `package.json`. To choose a different filename, run `npm run package -- --out ./codex-router-local.vsix`. The equivalent direct PowerShell command is `pwsh -NoProfile -File scripts/invoke.ps1 package`.
+
+Alternatively, run **Extensions: Install from VSIX...** in VS Code and select the generated file. Reload VS Code if prompted. Installation requires VS Code 1.135 or later.
+
+The package uses `codex-router-local` as its local publisher identifier. Packaging does not publish anything or require a Marketplace account. It includes only compiled JavaScript, the Activity Bar icon, the manifest and this README; local settings, source maps, tests, evaluation results and development logs are excluded. Missing repository and licence metadata are allowed for local packaging; review those before any future Marketplace release.
+
 ### Debugging
 
 The repository includes a **Run Codex Router** launch configuration. Open `src/extension.ts`, set a breakpoint, and press `F5`. VS Code first runs `npm run compile`, then opens an Extension Development Host with this extension loaded. Trigger **Codex Router: New Routed Task** in that development window to stop at the breakpoint. Use the **npm: watch** task while actively editing to rebuild on save.
