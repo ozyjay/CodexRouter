@@ -126,6 +126,10 @@ If something does not start, run **Codex Router: Show Diagnostics** from the Com
 
 The sidebar’s **Recommendation source** selector controls the same `codexRouter.routing.provider` preference. **Deterministic policy** is the default. **Local SLM** sends only the documented compact routing input to the configured loopback ModelDeck endpoint; Codex still executes the approved task in both modes. The Local SLM is experimental: an unavailable, malformed, or unsafe result visibly falls back to the deterministic policy.
 
+Use **Stop model** in the sticky sidebar controls to interrupt the active turn, including while it is starting. **Stopping…** remains visible until Codex confirms the turn has ended; a failed stop request offers a retry. Stopping does not undo edits already made. The command palette also provides **Codex Router: Cancel Active Turn**.
+
+The sidebar shows a **Live activity** feed for each running turn: commands, tool calls, file paths changed, reasoning summaries when supplied, and approval waits. Expand entries for details and command output. Entries show elapsed time and completion status; a timer reports time since the last activity or assistant-text event without assuming that a quiet turn is stuck. Output is limited to 16,384 characters per entry and 100 entries per turn; partial output lines are held until complete (or the item ends) for credential filtering. Reasoning summaries are optional and are not a continuous view of internal thinking. Activity details remain in panel memory, are cleared with **New conversation** or closing the view, and are not added to diagnostic logs or outcome records. Filtering is best effort; details can still contain sensitive source content.
+
 During a streamed Codex response, the sidebar displays an estimated `tok/s` rate. It is calculated locally from generated-text length and elapsed streaming time; it is not an App Server usage measurement.
 
 ModelDeck classification is not contacted under the default policy. The proxy command contacts ModelDeck only after its separate disclosure confirmation, regardless of the routing-provider setting. An unavailable, timed-out, malformed, non-loopback, out-of-scope, or inapplicable proxy result fails closed; it is never applied and never replaced with a generated fallback. An experimental classifier failure instead falls back visibly to the deterministic policy without a cloud-routing request. For classifier failures, the Codex Router output channel records a privacy-safe rejection category (for example, JSON parsing or contract validation). To inspect the full rejected response during local debugging, explicitly enable `codexRouter.diagnostics.logRawClassifierResponses`; it is disabled by default because the response may contain sensitive task content.
@@ -201,11 +205,12 @@ This starts a real Codex turn and consumes the user’s ChatGPT Codex allowance:
 1. Confirm `codex login status` reports ChatGPT authentication.
 2. Start an Extension Development Host with `F5`.
 3. Run **Codex Router: New Routed Task** with a harmless task such as “Add a comment to the README and report the change”.
-4. Confirm deterministic routing is shown, select a configuration, and verify streamed output, ordinary Codex approvals, and cancellation with a harmless long-running task if appropriate.
-5. Optionally enable `modeldeck-experimental` and confirm its identity or visible deterministic fallback.
-6. Optionally select a harmless unique excerpt, run **Generate ModelDeck Proxy Candidate for Selection**, confirm the disclosed context, and verify that dismissing the preview action makes no edit and starts no Codex turn. Routing it onwards consumes ChatGPT Codex allowance.
-7. Confirm the status item reports the selected model and effort. If analytics was enabled, inspect only the metadata record and exported report.
-8. In the sidebar, request a game concept, then ask “write this as a proposal”. Confirm the second turn uses that concept, including after changing model/effort. Choose **New conversation** and confirm the next task is independent. Development logs identify follow-ups with `conversation.context` and `continued: true`.
+4. Expand live activity entries during a task that runs a command and edits a file. Check streamed output, completion/exit status, quiet-period timing, keyboard operation of the expanders, and light/dark themes. Check that cancellation or a failed turn stops the timer, and a follow-up has a separate activity feed.
+5. Confirm deterministic routing is shown, select a configuration, and verify streamed output, ordinary Codex approvals, and cancellation with a harmless long-running task if appropriate.
+6. Optionally enable `modeldeck-experimental` and confirm its identity or visible deterministic fallback.
+7. Optionally select a harmless unique excerpt, run **Generate ModelDeck Proxy Candidate for Selection**, confirm the disclosed context, and verify that dismissing the preview action makes no edit and starts no Codex turn. Routing it onwards consumes ChatGPT Codex allowance.
+8. Confirm the status item reports the selected model and effort. If analytics was enabled, inspect only the metadata record and exported report.
+9. In the sidebar, request a game concept, then ask “write this as a proposal”. Confirm the second turn uses that concept, including after changing model/effort. Choose **New conversation** and confirm the next task is independent. Development logs identify follow-ups with `conversation.context` and `continued: true`.
 
 ## Current limitations and next steps
 
