@@ -49,7 +49,8 @@ function Set-PackageVersion {
     [Parameter(Mandatory)][string]$PackageJsonText
   )
 
-  $updatedText = $PackageJsonText -replace '("version"\s*:\s*")\d+\.\d+\.\d+(")', "`$1$NewVersion`$2"
+  $replacement = '${1}' + $NewVersion + '${2}'
+  $updatedText = $PackageJsonText -replace '("version"\s*:\s*")\d+\.\d+\.\d+(")', $replacement
   Set-Content -Path $packagePath -Value $updatedText -Encoding UTF8
   return $NewVersion
 }
