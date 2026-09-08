@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { activityScript } from "../src/activityUi";
+import { markdownScript } from "../src/markdownUi";
 import { readFileSync } from "node:fs";
 import { Script } from "node:vm";
 
 test("stop control stays visible and disabled until the turn ends, and allows retry", () => {
   const source = readFileSync("src/extension.ts", "utf8");
-  const script = source.split('<script nonce="${nonce}">')[1].split("</script>")[0].replace("${activityScript}", activityScript);
+  const script = source.split('<script nonce="${nonce}">')[1].split("</script>")[0]
+    .replace("${markdownScript}", markdownScript).replace("${activityScript}", activityScript);
   new Script(script);
   const stateFunction = script.slice(script.indexOf("function setUiState("), script.indexOf("function updateEfforts("));
   const element = () => ({ disabled: false, hidden: false, value: "", textContent: "", style: { display: "" }, querySelector: () => ({ open: false }) });
@@ -33,13 +35,16 @@ test("streaming follows the latest output without pulling readers away from earl
   const source = readFileSync("src/extension.ts", "utf8");
   const start = source.indexOf("function updateAssistant(");
   const end = source.indexOf("function updateEfforts(", start);
-  const context = { assistantMessage: { textContent: "Initial" }, conversation: { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 } };
+  const rendered: string[] = [];
+  const context = { assistantMessage: {}, assistantText: "Initial", renderMarkdown: (_target: unknown, text: string) => rendered.push(text), conversation: { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 } };
   runInNewContext(source.slice(start, end) + "updateAssistant(' output',true);", context);
-  assert.equal(context.assistantMessage.textContent, "Initial output");
+  assert.equal(context.assistantText, "Initial output");
+  assert.equal(rendered.at(-1), "Initial output");
   assert.equal(context.conversation.scrollTop, 1000);
   context.conversation.scrollTop = 100;
   runInNewContext("updateAssistant('More output',false);", context);
-  assert.equal(context.assistantMessage.textContent, "More output");
+  assert.equal(context.assistantText, "More output");
+  assert.equal(rendered.at(-1), "More output");
   assert.equal(context.conversation.scrollTop, 100);
 });
 
