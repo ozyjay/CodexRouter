@@ -3,7 +3,7 @@
   "displayName": "Codex Router",
   "publisher": "codex-router-local",
   "description": "Local, privacy-preserving routing for ChatGPT-authenticated Codex tasks.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "engines": {
     "vscode": "^1.135.0"
@@ -167,4 +167,5 @@
     "typescript": "^5.8.3"
   }
 }
+
 
