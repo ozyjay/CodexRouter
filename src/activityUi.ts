@@ -13,7 +13,7 @@ function startActivityFeed(){
   activityFeed=document.createElement('section');activityFeed.className='live-feed';activityFeed.setAttribute('aria-label','Live activity');activityFeed.setAttribute('aria-live','off');
   const title=document.createElement('strong');title.textContent='Live activity';
   activityClock=document.createElement('p');activityClock.className='hint';
-  const hint=document.createElement('p');hint.className='hint';hint.textContent='Expand an entry for details. Output is limited to 16,384 characters per entry and 100 entries per turn. Partial lines appear when complete. Credential filtering is best effort.';
+  const hint=document.createElement('p');hint.className='hint';hint.textContent='Entries with details can be expanded. Output is limited to 16,384 characters per entry and 100 entries per turn. Partial lines appear when complete. Credential filtering is best effort.';
   activityFeed.append(title,activityClock,hint);conversation.append(activityFeed);
   updateActivityClock();activityTimer=setInterval(updateActivityClock,1000);
 }
@@ -22,10 +22,15 @@ function showTurnActivity(value){
   lastActivityAt=Date.now();
   let row=activityRows.get(value.id);
   if(!row){
-    const details=document.createElement('details'),summary=document.createElement('summary'),body=document.createElement('pre');
-    details.append(summary,body);activityFeed.append(details);row={summary,body,value};activityRows.set(value.id,row);
+    const root=document.createElement('div'),summary=document.createElement('div');root.className='activity-row';root.append(summary);activityFeed.append(root);row={root,summary,value,expandable:false};activityRows.set(value.id,row);
   }
-  row.value=value;row.body.textContent=value.detail||'No details supplied yet.';
+  const expandable=Boolean(value.detail);
+  if(expandable&&!row.expandable){
+    const details=document.createElement('details'),summary=document.createElement('summary'),body=document.createElement('pre');details.append(summary,body);row.root.replaceChildren(details);row.summary=summary;row.body=body;row.expandable=true;
+  }else if(!expandable&&row.expandable){
+    const summary=document.createElement('div');row.root.replaceChildren(summary);row.summary=summary;row.body=undefined;row.expandable=false;
+  }
+  row.value=value;if(row.body)row.body.textContent=value.detail;
   if(typeof uiState!=='undefined'&&uiState==='stopping'){updateActivityClock();return;}
   if(!value.finishedAt)activityMessage.textContent=value.label+' · '+value.status;
   else {

@@ -79,6 +79,7 @@ test("activity UI renders literal text, retains separate turn feeds and clears t
     className = "";
     children: Element[] = [];
     append(...elements: Element[]) { this.children.push(...elements); }
+    replaceChildren(...elements: Element[]) { this.children = elements; }
     setAttribute() {}
   }
   const listeners = new Map<string, (event: { data: unknown }) => void>();
@@ -100,8 +101,12 @@ test("activity UI renders literal text, retains separate turn feeds and clears t
   const feed = conversation.children[0];
   assert.match(feed.children[1].textContent, /No new activity for 5s/);
   send({ type: "turn-activity", value: { id: "one", label: "Command", status: "Running", startedAt: 1000, detail: "<script>unsafe()</script>" } });
-  assert.equal(feed.children[3].children[1].textContent, "<script>unsafe()</script>");
+  assert.equal(feed.children[3].children[0].children[1].textContent, "<script>unsafe()</script>");
   assert.equal(activityMessage.textContent, "Command · Running");
+  send({ type: "turn-activity", value: { id: "two", label: "Reasoning summary", status: "Completed", startedAt: 6000, finishedAt: 6000, detail: "" } });
+  assert.equal(feed.children[4].children.length, 1);
+  assert.equal(feed.children[4].children[0].children.length, 0);
+  assert.doesNotMatch(feed.children[4].children[0].textContent, /No details supplied/);
   send({ type: "finished" });
   assert.equal(tick, undefined);
   assert.match(feed.children[1].textContent, /Turn ended/);
