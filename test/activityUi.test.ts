@@ -10,7 +10,7 @@ test("stop control stays visible and disabled until the turn ends, and allows re
   const script = source.split('<script nonce="${nonce}">')[1].split("</script>")[0].replace("${activityScript}", activityScript);
   new Script(script);
   const stateFunction = script.slice(script.indexOf("function setUiState("), script.indexOf("function updateEfforts("));
-  const element = () => ({ disabled: false, hidden: false, textContent: "", style: { display: "" } });
+  const element = () => ({ disabled: false, hidden: false, value: "", textContent: "", style: { display: "" }, querySelector: () => ({ open: false }) });
   const cancel = element();
   const task = element();
   const activityMessage = element();
@@ -27,6 +27,45 @@ test("stop control stays visible and disabled until the turn ends, and allows re
   runInNewContext(stateFunction + "setUiState('idle','');", context);
   assert.equal(cancel.style.display, "none");
   assert.equal(task.disabled, false);
+});
+
+test("streaming follows the latest output without pulling readers away from earlier messages", () => {
+  const source = readFileSync("src/extension.ts", "utf8");
+  const start = source.indexOf("function updateAssistant(");
+  const end = source.indexOf("function updateEfforts(", start);
+  const context = { assistantMessage: { textContent: "Initial" }, conversation: { scrollHeight: 1000, scrollTop: 600, clientHeight: 400 } };
+  runInNewContext(source.slice(start, end) + "updateAssistant(' output',true);", context);
+  assert.equal(context.assistantMessage.textContent, "Initial output");
+  assert.equal(context.conversation.scrollTop, 1000);
+  context.conversation.scrollTop = 100;
+  runInNewContext("updateAssistant('More output',false);", context);
+  assert.equal(context.assistantMessage.textContent, "More output");
+  assert.equal(context.conversation.scrollTop, 100);
+});
+
+test("composer submits through routing once and ignores empty or locked submissions", () => {
+  const source = readFileSync("src/extension.ts", "utf8");
+  const start = source.indexOf("function submit(){");
+  const end = source.indexOf("document.getElementById('submit').addEventListener", start);
+  const messages: unknown[] = [];
+  const context = {
+    task: { value: "  Add a focused test.  " }, metadata: { checked: true }, uiState: "idle",
+    assistantMessage: undefined, resizeTask() {}, addMessage() { return {}; },
+    setUiState(state: string) { context.uiState = state; },
+    post(value: unknown) { messages.push(value); }
+  };
+  runInNewContext(source.slice(start, end) + "submit();", context);
+  assert.deepEqual(JSON.parse(JSON.stringify(messages)), [{ type: "submit", task: "Add a focused test.", includeMetadata: true }]);
+  assert.equal(context.task.value, "");
+  context.task.value = "Do not submit during approval.";
+  for (const state of ["analysing", "awaiting-approval", "starting", "running", "stopping"]) {
+    context.uiState = state;
+    runInNewContext("submit();", context);
+  }
+  context.uiState = "idle";
+  context.task.value = "   ";
+  runInNewContext("submit();", context);
+  assert.equal(messages.length, 1);
 });
 
 test("activity UI renders literal text, retains separate turn feeds and clears timers", () => {
