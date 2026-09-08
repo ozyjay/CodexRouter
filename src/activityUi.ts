@@ -22,7 +22,10 @@ function showTurnActivity(value){
   lastActivityAt=Date.now();
   let row=activityRows.get(value.id);
   if(!row){
-    const root=document.createElement('div'),summary=document.createElement('div');root.className='activity-row';root.append(summary);activityFeed.append(root);row={root,summary,value,expandable:false};activityRows.set(value.id,row);
+    const follow=conversation.scrollHeight-conversation.scrollTop-conversation.clientHeight<48;
+    const root=document.createElement('div'),summary=document.createElement('div');root.className='activity-row';root.append(summary);conversation.append(root);row={root,summary,value,expandable:false};activityRows.set(value.id,row);
+    if(typeof assistantMessage!=='undefined'){assistantMessage=undefined;assistantText='';}
+    if(follow)conversation.scrollTop=conversation.scrollHeight;
   }
   const expandable=Boolean(value.detail);
   if(expandable&&!row.expandable){
