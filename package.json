@@ -151,6 +151,7 @@
   "scripts": {
     "compile": "pwsh -NoProfile -File scripts/invoke.ps1 compile",
     "package": "pwsh -NoProfile -File scripts/invoke.ps1 package",
+    "package-install": "pwsh -NoProfile -File scripts/invoke.ps1 package-install",
     "watch": "pwsh -NoProfile -File scripts/invoke.ps1 watch",
     "test": "pwsh -NoProfile -File scripts/invoke.ps1 test",
     "check:baseline": "pwsh -NoProfile -File scripts/invoke.ps1 check-baseline",

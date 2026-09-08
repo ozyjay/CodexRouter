@@ -93,11 +93,29 @@ From the repository root, create an installable VSIX:
 
 ```powershell
 npm ci
-npm run package
-code --install-extension ./codex-router-0.1.0.vsix
+npm run package-install
 ```
 
-`npm run package` compiles the extension, then uses the project's local `@vscode/vsce` dependency to create `codex-router-<version>.vsix` in the repository root. The version comes from `package.json`. To choose a different filename, run `npm run package -- --out ./codex-router-local.vsix`. The equivalent direct PowerShell command is `pwsh -NoProfile -File scripts/invoke.ps1 package`.
+`npm run package-install` is the local full flow: it compiles, increments `package.json`, packages the extension, then installs the resulting `.vsix` into the current VS Code host.
+
+By default, it increments the patch version (for example, `0.1.0` -> `0.1.1`).
+
+To bump a different part before packaging/installing:
+
+```powershell
+npm run package-install -- --bump minor
+npm run package-install -- --bump major
+```
+
+To choose a different output filename, pass `--out`:
+
+```powershell
+npm run package-install -- --out ./codex-router-local.vsix --bump minor
+```
+
+The equivalent direct PowerShell command is `pwsh -NoProfile -File scripts/invoke.ps1 package-install --bump minor`.
+
+`npm run package` still performs a package-only build for when you only want a VSIX artifact. It compiles the extension, then uses the project's local `@vscode/vsce` dependency to create `codex-router-<version>.vsix` in the repository root. The version comes from `package.json`. To choose a different filename, run `npm run package -- --out ./codex-router-local.vsix`. The equivalent direct PowerShell command is `pwsh -NoProfile -File scripts/invoke.ps1 package`.
 
 Alternatively, run **Extensions: Install from VSIX...** in VS Code and select the generated file. Reload VS Code if prompted. Installation requires VS Code 1.135 or later.
 
