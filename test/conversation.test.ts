@@ -57,3 +57,21 @@ test("failed follow-ups retain the thread and disposal during start cannot resto
   await pending;
   assert.equal(conversation.hasContext, false);
 });
+
+test("conversation history records turns, returns snapshots, and resets", () => {
+  const conversation = new SidebarConversation();
+  conversation.beginTurn("First task");
+  conversation.replaceAssistant("Working…");
+  conversation.appendAssistant(" done");
+
+  const history = conversation.history();
+  assert.deepEqual(history, [
+    { role: "user", text: "First task" },
+    { role: "assistant", text: "Working… done" }
+  ]);
+
+  history[0].text = "changed outside";
+  assert.equal(conversation.history()[0].text, "First task");
+  conversation.reset();
+  assert.deepEqual(conversation.history(), []);
+});
