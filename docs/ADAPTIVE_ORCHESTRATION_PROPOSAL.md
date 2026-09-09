@@ -22,8 +22,9 @@ The evidence-first command milestone now supplies the prerequisite product basel
 - versioned local outcomes distinguish App Server turn state from user-reported task and validation results;
 - basic Markdown export flags small or incomplete observational samples.
 - an explicitly confirmed selected-code ModelDeck proxy can produce a strict advisory patch preview for optional independent Codex review.
+- an experimental bounded turn planner can choose one turn or an ordered exploration, implementation and review sequence, with live-catalogue validation, per-phase guardrails and approval before every turn.
 
-The sidebar panel, matched live evaluation, phase-aware routing, subagent allocation, and automatic policy learning remain future work. Nothing in the current milestone is evidence that ModelDeck, a model tier, or a multi-agent strategy is superior.
+Matched live evaluation, output-adaptive replanning, per-phase outcome attribution, subagent allocation, and automatic policy learning remain future work. Nothing in the current milestone is evidence that ModelDeck, a model tier, or a multi-turn strategy is superior.
 
 ## Local routing-provider choice
 
@@ -110,47 +111,35 @@ Start with narrow tasks whose requested change, target test, and expected assert
 
 Prioritise avoiding under-routing on consequential work. A saving is not a success if verified quality regresses.
 
-## Future-compatible execution strategy contract
+## Implemented execution strategy contract
 
-The first shipped routing contract remains per-turn. A later version may represent execution strategy as well as allocation:
+The experimental ModelDeck path now represents a bounded execution strategy as well as allocation. Its implemented contract is intentionally smaller than the earlier conceptual parent/subagent design:
 
 ```json
 {
-  "executionStrategy": "sequential_phases",
-  "parent": {
-    "model": "gpt-5.6-terra",
-    "effort": "medium"
-  },
-  "phases": [
+  "strategy": "sequential-turns",
+  "turns": [
     {
-      "name": "exploration",
-      "agentRole": "explorer",
+      "phase": "exploration",
       "model": "gpt-5.6-luna",
-      "effort": "medium",
-      "parallelisable": false
+      "effort": "medium"
     },
     {
-      "name": "implementation",
-      "agentRole": "worker",
+      "phase": "implementation",
       "model": "gpt-5.6-terra",
-      "effort": "medium",
-      "parallelisable": false
+      "effort": "medium"
     },
     {
-      "name": "review",
-      "agentRole": "reviewer",
+      "phase": "review",
       "model": "gpt-5.6-sol",
-      "effort": "high",
-      "parallelisable": false
+      "effort": "high"
     }
   ],
-  "strength": "moderate",
-  "reasons": ["Map the relevant code path before editing", "Use an independent review phase"],
-  "escalationSignals": ["Tests fail after two repair turns", "The change becomes architectural"]
+  "reasons": ["Map the relevant code path before editing", "Use an independent review phase"]
 }
 ```
 
-This is conceptual only. The implementation must validate every proposed model and effort against the live App Server catalogue, confirm custom-agent/subagent support, and reject strategies whose interfaces are unavailable.
+The implementation accepts only one implementation turn or two to three monotonically ordered phases that include implementation. It validates every allocation against the live App Server catalogue, applies deterministic safety guardrails to each phase, and falls back to one validated turn on any planning failure. The SLM cannot write phase prompts: router-owned deterministic instructions are used. Turns share an App Server thread but remain separately approved. Subagents and parallel execution are not part of this slice.
 
 ## Deterministic decision rules
 
@@ -189,8 +178,8 @@ No outcome record may contain task text, source code, complete generated output,
 7. Evaluate the implemented opt-in ModelDeck structured classifier against the deterministic baseline before generalising the provider boundary.
 8. Add and evaluate Ollama and LM Studio presets, retaining only providers that meet the same privacy and reliability contract.
 9. Extend the implemented App Server submission, cancellation, approval, and per-turn override flow only through verified version-matched interfaces.
-10. Add phase-aware routing and subagent assignment only where the supported interface is confirmed.
-11. Add outcome attribution and adaptive recommendations.
+10. Maintain the implemented bounded phase-aware sequential routing; add subagent assignment only where the supported interface is confirmed.
+11. Add per-phase outcome attribution and output-adaptive recommendations.
 12. Consider automatic routing only after advisory recommendations are demonstrably reliable.
 
 ## Updated success criterion

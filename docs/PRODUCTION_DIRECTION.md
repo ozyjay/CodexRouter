@@ -14,19 +14,20 @@ The evidence-first command milestone is implemented and is now complemented by t
 - routing and execution context are separate and previewed;
 - deterministic routing is the default policy;
 - ModelDeck is explicitly opt-in and experimental;
+- successful ModelDeck routing can propose one or up to three sequential exploration, implementation and review turns, each with its own validated allocation and approval;
 - selected code can be sent to an explicitly confirmed ModelDeck proxy route for a constrained advisory patch preview, with no automatic workspace edit;
 - ordinal recommendation strength replaces user-facing percentage confidence;
 - App Server catalogue validation, approval-request handling, terminal states, and supported turn interruption are implemented against the inspected schema, with a live smoke test still pending;
 - privacy-safe outcomes distinguish turn state from user-observed task results and can be exported or deleted.
 
-The dedicated Activity Bar sidebar consumes the existing session controller rather than introducing another routing flow.
+The dedicated Activity Bar sidebar and sequential runner consume the existing session controller rather than introducing a competing execution flow.
 
 ## Product position
 
 Codex Router is not another general coding agent. It is a local decision layer and launchpad for Codex:
 
 ```text
-Describe task → route locally → review recommendation → approve/override → run Codex → observe outcome
+Describe task → route and plan locally → approve/override each turn → run Codex in one thread → observe outcome
 ```
 
 Its value is transparent model/effort selection, safe handling of consequential work, and evidence for whether adaptive routing improves outcomes. It should not duplicate broad file editing, Git, terminal, approvals, or agent-history interfaces that Codex already provides.
@@ -64,6 +65,8 @@ The recommendation card is the centre of the product. It must show:
 
 Selecting **Use recommendation** starts a turn in the sidebar's current App Server thread, creating the thread on the first turn. Follow-ups retain Codex conversation context while model and effort remain selectable before each approved turn. **New conversation** explicitly resets the sidebar; standalone command tasks start independent threads. Conversation identity is held in extension-host memory and is never shared across workspaces. If the App Server restarts, require an explicit reset. Selecting **Override** uses the same catalogue-constrained allocation flow.
 
+With the experimental Local SLM provider, the recommendation also includes a bounded plan. A single request may use one implementation turn or an ordered sequence of exploration, implementation and review turns. Every phase is a separate App Server turn in the same thread, with fixed router-owned phase instructions and explicit approval or override before it starts. Planner failure falls back to the validated single-turn recommendation; no deterministic policy task is expanded into multiple turns.
+
 ### Secondary entry points
 
 - **Codex Router: New Routed Task** is the universal keyboard/command-palette entry point.
@@ -79,7 +82,8 @@ VS Code extension host
   ├─ Routing service
   │   ├─ deterministic policy and guardrails (default)
   │   ├─ optional ModelDeck provider (loopback only)
-  │   └─ recommendation validation
+  │   ├─ bounded sequential turn planner
+  │   └─ recommendation and plan validation
   ├─ constrained ModelDeck proxy-candidate service (loopback, selected code, preview only)
   ├─ Codex App Server client (child process, stdio JSON-RPC)
   ├─ local outcome store and evaluation exporter
@@ -103,6 +107,8 @@ Purpose: schema-constrained task classification only
 Configure the extension with that public model ID. The routing model must be a small local instruction-following model that reliably returns compact JSON under a low temperature. It does not need coding-agent capability; classification consistency and low latency matter more.
 
 Supply the current App Server model IDs and their supported reasoning efforts in every classifier request. Validate the resulting pair against that catalogue and retain explicit rejection reasons in operational diagnostics. Opt-in development logs live in the extension host's log directory and contain filtered sensitive content; the webview never receives these logs.
+
+Turn planning uses the same compact task and catalogue context. It can select only the fixed exploration, implementation and review phases, never free-form execution instructions, and is limited to three sequential turns. Safety guardrails are applied independently to every phase allocation.
 
 The optional selected-code workflow uses a separate coding-capable ModelDeck route:
 
@@ -144,6 +150,8 @@ Before relying on it, validate the exact active ModelDeck profile, model ID, `re
 - Integrate optional identifiers that allow manual correlation with Codex Local Meter without reading its private extension state.
 
 **Exit criterion:** representative tasks can be compared on verification rate, repair turns, elapsed time, override rate, under-routing, and over-routing.
+
+The first phase-aware execution slice is implemented, but sequential outcomes are deliberately omitted from the version 2 outcome store until it can attribute every phase rather than mislabelling the whole sequence with its final allocation.
 
 ### Stage 4 — measured adaptation
 

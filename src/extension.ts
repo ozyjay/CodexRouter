@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import * as vscode from "vscode";
 import { CodexAppServer, isChatGPTAuthentication } from "./appServer";
-import { AllocationSelection, CodexModel, OUTCOME_SCHEMA_VERSION, ReasoningEffort, RoutingInput, RoutingProvider, RoutingRecommendation, RoutingSessionInput, TurnState } from "./contracts";
+import { AllocationSelection, CodexModel, OUTCOME_SCHEMA_VERSION, ReasoningEffort, RoutingInput, RoutingProvider, RoutingRecommendation, RoutingSessionInput, TurnPlan, TurnState } from "./contracts";
 import { ModelDeckProvider, ProxyCandidateError, assertModelDeckModelId, classifierCatalogue, classifyModelDeckFailure } from "./modelDeck";
 import { OutcomeStore, renderOutcomeMarkdown } from "./outcomes";
 import { recommendWithProvider } from "./policy";
@@ -14,6 +14,7 @@ import { TurnActivity, TurnActivityTracker } from "./turnActivity";
 import { activityScript } from "./activityUi";
 import { markdownScript } from "./markdownUi";
 import { TurnStopController } from "./turnStop";
+import { buildTurnPlan, phaseLabel, phasePrompt, singleTurnPlan } from "./orchestration";
 
 let appServer: CodexAppServer | undefined;
 let activeSession: RoutingSessionController | undefined;
@@ -213,6 +214,9 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
   let turnState: TurnState | undefined;
   let outcomeRecorded = false;
   let cancellationDisposable: vscode.Disposable | undefined;
+  let lastRecommendation: RoutingRecommendation | undefined;
+  let lastSelection: AllocationSelection | undefined;
+  let plannedTurnCount = 1;
   const diagnostics = new RoutingDiagnostics(vscode.workspace.getConfiguration("codexRouter").get<boolean>("diagnostics.developmentLogs", false), context.logUri.fsPath, (message) => output.appendLine(message));
   const originalSink = sink;
   sink = { ...originalSink, text: (message) => { diagnostics.delta(message); originalSink.text(message); } };
@@ -230,39 +234,60 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
     }
     if (!status.models.length) throw new Error("Codex App Server reported no available models.");
 
-    session = new RoutingSessionController(input, (routingInput, models) => route(routingInput, models, diagnostics), {
-      execute: (prompt, selection, signal) => {
-        diagnostics.sensitive("codex.prompt", prompt);
-        return executeTurn(server, prompt, selection, signal, sink, conversation);
-      }
-    });
+    const primaryRecommendation = await route(input.routing, status.models, diagnostics);
+    const turnPlan = await planTurns(input.routing, status.models, primaryRecommendation, diagnostics);
+    plannedTurnCount = turnPlan.turns.length;
+    const executionConversation = conversation ?? (turnPlan.turns.length > 1 ? new SidebarConversation() : undefined);
+    session = createPlannedSession(input, primaryRecommendation, server, sink, executionConversation, diagnostics);
     const summaries = session.contextSummary();
     if (conversation?.hasContext) summaries.execution += "; previous turns in this conversation";
     sink.text(`**Context preview**\n\nRouting: ${summaries.routing}.\n\nCodex execution: ${summaries.execution}.\n\n`);
-    const recommendation = await session.analyse(status.models);
-    diagnostics.record("routing.recommended", { model: recommendation.recommendedModel, effort: recommendation.recommendedEffort, source: recommendation.source, providerFallback: recommendation.providerFallback, catalogueFallback: recommendation.catalogueFallback });
-    session.awaitApproval();
-    sink.activity?.("awaiting-approval", "Choose the recommended configuration or set an override to start Codex.");
-    sink.text(formatRecommendation(recommendation, summaries.routing, summaries.execution));
-    const choice = await (sink.chooseConfiguration ?? chooseConfiguration)(session, recommendation, status.models);
-    if (!choice) {
-      diagnostics.record("approval.dismissed", {});
-      return;
-    }
-    diagnostics.record("approval.accepted", choice);
-
-    sink.progress(`Starting Codex with ${choice.model} / ${choice.effort}…`);
-    sink.activity?.("starting", `Starting Codex with ${choice.model} / ${choice.effort}…`);
-    setStatus("running", choice.model, choice.effort);
-    activeSession = session;
-    cancellationDisposable = sink.onCancellationRequested?.(() => session?.cancel());
     startedAt = Date.now();
-    turnState = await session.execute();
-    diagnostics.record("turn.finished", { state: turnState, durationMs: Date.now() - startedAt });
-    sink.text(turnState === "completed" ? "\n\nCodex turn completed.\n" : turnState === "cancelled" ? "\n\nCodex turn cancelled.\n" : "\n\nCodex turn failed.\n");
-    setStatus("ready", choice.model, choice.effort);
-    outcomeRecorded = true;
-    await safeRecordOutcome(context, recommendation, choice, Date.now() - startedAt, turnState, input.execution.localProxyCandidate?.model);
+    sink.text(formatTurnPlan(turnPlan));
+
+    let completedTurns = 0;
+    for (const [index, planned] of turnPlan.turns.entries()) {
+      const phaseInput = plannedSessionInput(input, planned.phase, index, turnPlan.turns.length);
+      session = createPlannedSession(phaseInput, planned.recommendation, server, sink, executionConversation, diagnostics);
+      const recommendation = await session.analyse(status.models);
+      lastRecommendation = recommendation;
+      diagnostics.record("routing.turn.recommended", { turn: index + 1, turns: turnPlan.turns.length, phase: planned.phase, model: recommendation.recommendedModel, effort: recommendation.recommendedEffort, source: recommendation.source, providerFallback: recommendation.providerFallback, catalogueFallback: recommendation.catalogueFallback });
+      session.awaitApproval();
+      const turnDescription = turnPlan.turns.length > 1 ? `${phaseLabel(planned.phase)} turn ${index + 1} of ${turnPlan.turns.length}` : "Codex turn";
+      sink.activity?.("awaiting-approval", `Review the ${turnDescription.toLowerCase()} configuration before starting Codex.`);
+      sink.text(`\n\n### ${turnDescription}\n\n${formatRecommendation(recommendation, summaries.routing, summaries.execution)}`);
+      const choice = await (sink.chooseConfiguration ?? chooseConfiguration)(session, recommendation, status.models);
+      if (!choice) {
+        diagnostics.record("approval.dismissed", { turn: index + 1, phase: planned.phase });
+        if (completedTurns > 0) sink.text(`\n\nTurn sequence stopped after ${completedTurns} of ${turnPlan.turns.length} turns.\n`);
+        break;
+      }
+      lastSelection = choice;
+      diagnostics.record("approval.accepted", { ...choice, turn: index + 1, phase: planned.phase });
+
+      sink.text(`\n\nStarting ${turnDescription.toLowerCase()} with ${choice.model} / ${choice.effort}…\n\n`);
+      sink.activity?.("starting", `Starting ${turnDescription.toLowerCase()} with ${choice.model} / ${choice.effort}…`);
+      setStatus("running", choice.model, choice.effort);
+      activeSession = session;
+      cancellationDisposable = sink.onCancellationRequested?.(() => session?.cancel());
+      const turnStartedAt = Date.now();
+      turnState = await session.execute();
+      cancellationDisposable?.dispose();
+      cancellationDisposable = undefined;
+      diagnostics.record("turn.finished", { turn: index + 1, turns: turnPlan.turns.length, phase: planned.phase, state: turnState, durationMs: Date.now() - turnStartedAt });
+      sink.text(turnState === "completed" ? `\n\n${turnDescription} completed.\n` : turnState === "cancelled" ? `\n\n${turnDescription} cancelled.\n` : `\n\n${turnDescription} failed.\n`);
+      setStatus("ready", choice.model, choice.effort);
+      if (turnState !== "completed") break;
+      completedTurns++;
+    }
+    if (completedTurns === turnPlan.turns.length && turnPlan.turns.length > 1) sink.text(`\n\nAll ${completedTurns} planned Codex turns completed.\n`);
+    if (lastRecommendation && lastSelection && turnState && plannedTurnCount === 1) {
+      outcomeRecorded = true;
+      await safeRecordOutcome(context, lastRecommendation, lastSelection, Date.now() - startedAt, turnState, input.execution.localProxyCandidate?.model);
+    } else if (plannedTurnCount > 1) {
+      diagnostics.record("outcome.skipped", { reason: "sequential-attribution-not-supported", turns: plannedTurnCount });
+      output.appendLine("[outcome] Sequential task outcome was not stored because per-phase attribution is not yet supported.");
+    }
   } catch (error) {
     const cancelled = session?.state === "cancelled";
     const message = error instanceof Error ? error.message : "Unexpected routing error.";
@@ -271,10 +296,10 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
     output.appendLine(`[error] ${message}`);
     sink.text(cancelled ? "Codex Router cancelled the active turn." : `Codex Router could not complete the task: ${message}`);
     setStatus(cancelled ? "ready" : "error");
-    if (!outcomeRecorded && session?.recommendation && session.selection && startedAt !== undefined) {
+    if (!outcomeRecorded && plannedTurnCount === 1 && (lastRecommendation ?? session?.recommendation) && (lastSelection ?? session?.selection) && startedAt !== undefined) {
       turnState = cancelled ? "cancelled" : "failed";
       outcomeRecorded = true;
-      await safeRecordOutcome(context, session.recommendation, session.selection, Date.now() - startedAt, turnState, input.execution.localProxyCandidate?.model);
+      await safeRecordOutcome(context, lastRecommendation ?? session!.recommendation!, lastSelection ?? session!.selection!, Date.now() - startedAt, turnState, input.execution.localProxyCandidate?.model);
     }
   } finally {
     diagnostics.finish(turnState ?? session?.state ?? "not-started");
@@ -284,17 +309,31 @@ async function routeAndRun(context: vscode.ExtensionContext, input: RoutingSessi
   }
 }
 
+function createPlannedSession(input: RoutingSessionInput, recommendation: RoutingRecommendation, server: CodexAppServer, sink: StreamSink, conversation: SidebarConversation | undefined, diagnostics: RoutingDiagnostics): RoutingSessionController {
+  return new RoutingSessionController(input, async () => recommendation, {
+    execute: (prompt, selection, signal) => {
+      diagnostics.sensitive("codex.prompt", prompt);
+      return executeTurn(server, prompt, selection, signal, sink, conversation);
+    }
+  });
+}
+
+function plannedSessionInput(input: RoutingSessionInput, phase: TurnPlan["turns"][number]["phase"], index: number, count: number): RoutingSessionInput {
+  if (count === 1) return input;
+  return {
+    routing: input.routing,
+    execution: index === 0
+      ? { ...input.execution, task: phasePrompt(phase, index + 1, count, input.execution.task) }
+      : { task: phasePrompt(phase, index + 1, count) }
+  };
+}
+
 async function route(input: RoutingInput, models: CodexModel[], diagnostics: RoutingDiagnostics): Promise<RoutingRecommendation> {
   const configuration = vscode.workspace.getConfiguration("codexRouter");
   const provider = configuration.get<RoutingProvider>("routing.provider", "deterministic");
   const logRawClassifierResponses = configuration.get<boolean>("diagnostics.logRawClassifierResponses", false);
   diagnostics.record("routing.started", { provider });
-  return recommendWithProvider(input, models, provider, () => new ModelDeckProvider({
-      baseUrl: configuration.get<string>("modelDeck.baseUrl", "http://127.0.0.1:8600/v1"),
-      routerModel: configuration.get<string>("modelDeck.routerModel", "") || undefined,
-      timeoutMs: configuration.get<number>("requestTimeoutMs", 5_000),
-      developmentDebug: configuration.get<boolean>("diagnostics.developmentLogs", false) ? (event, detail) => diagnostics.sensitive(`classifier.${event}`, detail) : undefined
-    }), (fallback, diagnostic, rawResponse) => {
+  return recommendWithProvider(input, models, provider, () => createRoutingProvider(configuration, diagnostics), (fallback, diagnostic, rawResponse) => {
       diagnostics.record("routing.fallback", { fallback, diagnostic });
       output.appendLine(`[router fallback] ${fallback}${diagnostic ? ` (${diagnostic})` : ""}`);
       if (logRawClassifierResponses && rawResponse !== undefined) {
@@ -303,6 +342,37 @@ async function route(input: RoutingInput, models: CodexModel[], diagnostics: Rou
         output.appendLine("[end router classifier raw response]");
       }
     }, (rejection) => diagnostics.record("routing.allocation-rejected", { ...rejection, requestedModel: diagnosticIdentifier(rejection.requestedModel), requestedEffort: diagnosticIdentifier(rejection.requestedEffort) }));
+}
+
+async function planTurns(input: RoutingInput, models: CodexModel[], recommendation: RoutingRecommendation, diagnostics: RoutingDiagnostics): Promise<TurnPlan> {
+  const configuration = vscode.workspace.getConfiguration("codexRouter");
+  const enabled = configuration.get<boolean>("routing.turnTaking.enabled", true);
+  if (!enabled || recommendation.source !== "local-model") return singleTurnPlan(recommendation);
+  diagnostics.record("turn-plan.started", { provider: "modeldeck-experimental" });
+  try {
+    const candidate = await createRoutingProvider(configuration, diagnostics).planTurns(input, models, recommendation);
+    const plan = buildTurnPlan(candidate, input, models, recommendation);
+    diagnostics.record("turn-plan.accepted", {
+      strategy: plan.strategy,
+      turns: plan.turns.map((turn) => ({ phase: turn.phase, model: turn.recommendation.recommendedModel, effort: turn.recommendation.recommendedEffort }))
+    });
+    return plan;
+  } catch (error) {
+    const fallback = classifyModelDeckFailure(error);
+    const diagnostic = error instanceof Error ? error.message.replace(/Local turn plan is invalid: /, "").slice(0, 240) : undefined;
+    diagnostics.record("turn-plan.fallback", { fallback, diagnostic });
+    output.appendLine(`[turn-plan fallback] ${fallback}${diagnostic ? ` (${diagnostic})` : ""}`);
+    return singleTurnPlan(recommendation, fallback);
+  }
+}
+
+function createRoutingProvider(configuration: vscode.WorkspaceConfiguration, diagnostics: RoutingDiagnostics): ModelDeckProvider {
+  return new ModelDeckProvider({
+    baseUrl: configuration.get<string>("modelDeck.baseUrl", "http://127.0.0.1:8600/v1"),
+    routerModel: configuration.get<string>("modelDeck.routerModel", "") || undefined,
+    timeoutMs: configuration.get<number>("requestTimeoutMs", 5_000),
+    developmentDebug: configuration.get<boolean>("diagnostics.developmentLogs", false) ? (event, detail) => diagnostics.sensitive(`classifier.${event}`, detail) : undefined
+  });
 }
 
 async function chooseConfiguration(session: RoutingSessionController, recommendation: RoutingRecommendation, models: CodexModel[]): Promise<AllocationSelection | undefined> {
@@ -554,6 +624,15 @@ function formatRecommendation(recommendation: RoutingRecommendation, routingCont
   return `**Codex Router recommendation** — ${recommendation.recommendedModel} / ${recommendation.recommendedEffort}\n\nStrength: ${recommendation.strength}; source: ${origin}; policy: ${recommendation.policyVersion}.\n\n${recommendation.reasons.map((reason) => `- ${reason}`).join("\n")}${signals}${fallback ? `\n\n${fallback}` : ""}\n\nRouting context: ${routingContext}.\n\nExecution context: ${executionContext}.\n\n`;
 }
 
+function formatTurnPlan(plan: TurnPlan): string {
+  if (plan.strategy === "single-turn") {
+    const fallback = plan.providerFallback ? ` Local planning fell back safely (${plan.providerFallback}).` : "";
+    return `**Turn plan** — one Codex turn.${fallback}\n\n`;
+  }
+  const turns = plan.turns.map((turn, index) => `${index + 1}. ${phaseLabel(turn.phase)} — ${turn.recommendation.recommendedModel} / ${turn.recommendation.recommendedEffort}`).join("\n");
+  return `**Turn plan** — ${plan.turns.length} sequential Codex turns, with approval before each turn.\n\n${turns}\n\n${plan.reasons.join(" ")}\n\n`;
+}
+
 function setStatus(state: "checking" | "ready" | "running" | "offline" | "auth-required" | "error", model?: string, effort?: ReasoningEffort): void {
   const labels: Record<typeof state, string> = {
     checking: "$(sync~spin) Codex Router: checking",
@@ -660,6 +739,12 @@ class RouterSidebarProvider implements vscode.WebviewViewProvider {
       cancelActiveTurn();
       return;
     }
+    if (message.type === "dismiss-selection" && this.pendingSelection) {
+      const pending = this.pendingSelection;
+      this.pendingSelection = undefined;
+      pending.resolve(undefined);
+      return;
+    }
     if (message.type === "routing-provider") {
       try {
         await vscode.workspace.getConfiguration("codexRouter").update("routing.provider", message.provider, vscode.ConfigurationTarget.Global);
@@ -750,12 +835,13 @@ class RouterSidebarProvider implements vscode.WebviewViewProvider {
   }
 }
 
-function isSidebarMessage(value: unknown): value is { type: "ready" } | { type: "new-conversation" } | { type: "submit"; task: string; includeMetadata: boolean } | { type: "cancel" } | { type: "routing-provider"; provider: RoutingProvider } | { type: "selection"; useRecommendation: boolean; model: string; effort: string } {
+function isSidebarMessage(value: unknown): value is { type: "ready" } | { type: "new-conversation" } | { type: "submit"; task: string; includeMetadata: boolean } | { type: "cancel" } | { type: "dismiss-selection" } | { type: "routing-provider"; provider: RoutingProvider } | { type: "selection"; useRecommendation: boolean; model: string; effort: string } {
   if (!value || typeof value !== "object" || !("type" in value)) return false;
   const message = value as Record<string, unknown>;
   if (message.type === "ready") return true;
   if (message.type === "new-conversation") return true;
   if (message.type === "cancel") return true;
+  if (message.type === "dismiss-selection") return true;
   if (message.type === "routing-provider") return message.provider === "deterministic" || message.provider === "modeldeck-experimental";
   if (message.type === "submit") return typeof message.task === "string" && typeof message.includeMetadata === "boolean";
   return message.type === "selection" && typeof message.useRecommendation === "boolean" && typeof message.model === "string" && typeof message.effort === "string";
@@ -789,8 +875,8 @@ textarea,select{background:var(--vscode-input-background);border:1px solid var(-
 <div class="run-controls"><div id="activity" class="activity" role="status" aria-live="polite" hidden><span id="spinner" class="spinner" aria-hidden="true"></span><span id="activity-message"></span></div></div>
 <section class="composer" aria-label="New routed task">
 <label class="sr-only" for="task">Task</label><textarea id="task" rows="2" placeholder="Ask for changes or a follow-up…" aria-describedby="task-hint"></textarea>
-<div class="composer-toolbar"><details class="composer-options"><summary title="Task context and conversation help">Context</summary><div class="options-content"><label class="field-inline"><input id="metadata" type="checkbox"> Include active-file metadata</label><p class="hint">Shares the language and relative filename, but no source code.</p><p class="hint">Follow-ups retain previous Codex turns until you start a new conversation or restart the extension.</p></div></details><div class="source-picker"><label class="sr-only" for="provider">Recommendation source</label><select id="provider" title="Recommendation source"><option value="deterministic">Deterministic</option><option value="modeldeck-experimental">Local SLM (experimental)</option></select></div><button id="submit" class="button primary send" type="button" aria-label="Recommend a model for this task" title="Recommend a model (Enter)">↑</button><button id="cancel" class="button secondary" type="button" aria-label="Stop the active Codex turn">Stop model</button></div>
+<div class="composer-toolbar"><details class="composer-options"><summary title="Task context and conversation help">Context</summary><div class="options-content"><label class="field-inline"><input id="metadata" type="checkbox"> Include active-file metadata</label><p class="hint">Shares the language and relative filename, but no source code.</p><p class="hint">Follow-ups retain previous Codex turns until you start a new conversation or restart the extension.</p><p class="hint">Local SLM routing may plan up to three turns; every turn requires approval.</p></div></details><div class="source-picker"><label class="sr-only" for="provider">Recommendation source</label><select id="provider" title="Recommendation source"><option value="deterministic">Deterministic</option><option value="modeldeck-experimental">Local SLM (experimental)</option></select></div><button id="submit" class="button primary send" type="button" aria-label="Recommend a model for this task" title="Recommend a model (Enter)">↑</button><button id="cancel" class="button secondary" type="button" aria-label="Stop the active Codex turn">Stop model</button></div>
 </section><p id="task-hint" class="composer-hint">Enter to recommend · Shift+Enter for a new line</p></footer>
-<section id="recommendation" class="recommendation" aria-label="Recommended Codex configuration"><p id="allocation" class="allocation"></p><p id="reasons" class="hint"></p><div class="actions"><button id="accept" class="button primary">Start Codex</button></div><details class="override-fields"><summary>Override model or effort</summary><label class="field" for="model">Override model</label><select id="model"></select><label class="field" for="effort">Effort</label><select id="effort"></select><div class="actions"><button id="override" class="button secondary">Start override</button></div></details></section>
-<script nonce="${nonce}">${markdownScript}const vscode=acquireVsCodeApi(),task=document.getElementById('task'),metadata=document.getElementById('metadata'),cancel=document.getElementById('cancel'),provider=document.getElementById('provider'),conversation=document.getElementById('conversation'),recommendation=document.getElementById('recommendation'),model=document.getElementById('model'),effort=document.getElementById('effort'),accept=document.getElementById('accept'),override=document.getElementById('override'),activity=document.getElementById('activity'),activityMessage=document.getElementById('activity-message'),spinner=document.getElementById('spinner');let models=[],assistantMessage,assistantText='',uiState='idle';function post(value){vscode.postMessage(value)}function addMessage(role,text){const message=document.createElement('div');message.className='message '+role;if(role==='assistant'){assistantText=text;renderMarkdown(message,text)}else message.textContent=text;conversation.append(message);message.scrollIntoView({block:'end'});return message}function restoreHistory(messages){conversation.replaceChildren();assistantMessage=undefined;assistantText='';for(const entry of messages)addMessage(entry.role,entry.text);assistantMessage=undefined;assistantText=''}function setUiState(state,message){uiState=state;const awaiting=state==='awaiting-approval',active=state==='starting'||state==='running'||state==='stopping',locked=state!=='idle';task.disabled=locked;document.getElementById('submit').disabled=locked||!task.value.trim();document.getElementById('submit').hidden=active;document.getElementById('newConversation').disabled=locked;metadata.disabled=locked;provider.disabled=locked;accept.disabled=!awaiting;override.disabled=!awaiting;model.disabled=!awaiting;effort.disabled=!awaiting;cancel.style.display=active?'block':'none';cancel.disabled=state==='stopping';cancel.textContent=state==='stopping'?'Stopping…':'Stop model';recommendation.style.display=awaiting?'block':'none';if(!awaiting)recommendation.querySelector('details').open=false;activity.hidden=state==='idle';spinner.hidden=awaiting;if(message)activityMessage.textContent=message}function updateAssistant(text,append){if(!assistantMessage){if(!append)return;assistantMessage=addMessage('assistant','')}const follow=conversation.scrollHeight-conversation.scrollTop-conversation.clientHeight<48;assistantText=append?assistantText+text:text;renderMarkdown(assistantMessage,assistantText);if(follow)conversation.scrollTop=conversation.scrollHeight}function updateEfforts(){const selected=models.find(entry=>entry.model===model.value);effort.replaceChildren(...(selected?.efforts??[]).map(value=>{const option=document.createElement('option');option.value=value;option.textContent=value;return option}))}function resizeTask(){task.style.height='auto';task.style.height=Math.min(task.scrollHeight,window.innerHeight*.25)+'px'}function submit(){const value=task.value.trim();if(!value||uiState!=='idle')return;addMessage('user',value);assistantMessage=addMessage('assistant','Checking Codex…');task.value='';resizeTask();setUiState('analysing','Checking Codex and selecting a configuration…');post({type:'submit',task:value,includeMetadata:metadata.checked})}document.getElementById('submit').addEventListener('click',submit);task.addEventListener('input',()=>{resizeTask();document.getElementById('submit').disabled=uiState!=='idle'||!task.value.trim()});window.addEventListener('resize',resizeTask);task.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing&&!task.disabled){event.preventDefault();submit()}});document.getElementById('newConversation').addEventListener('click',()=>post({type:'new-conversation'}));cancel.addEventListener('click',()=>{if(cancel.disabled)return;setUiState('stopping','Stopping the model… Waiting for Codex to confirm.');post({type:'cancel'})});provider.addEventListener('change',()=>post({type:'routing-provider',provider:provider.value}));model.addEventListener('change',updateEfforts);accept.addEventListener('click',()=>{setUiState('starting','Starting Codex with the recommended configuration…');post({type:'selection',useRecommendation:true,model:'',effort:''})});override.addEventListener('click',()=>{setUiState('starting','Starting Codex with your override…');post({type:'selection',useRecommendation:false,model:model.value,effort:effort.value})});window.addEventListener('message',event=>{const message=event.data;if(message.type==='conversation-history')restoreHistory(message.messages);if(message.type==='conversation-reset'){document.body.append(recommendation);recommendation.style.display='none';conversation.replaceChildren();assistantMessage=undefined;assistantText='';task.focus()}if(message.type==='routing-provider'){provider.value=message.provider}if(message.type==='started'){setUiState('analysing','Checking Codex and selecting a configuration…')}if(message.type==='activity'){setUiState(message.state,message.message)}if(message.type==='progress'){updateAssistant(message.message,false);if(uiState!=='awaiting-approval')activityMessage.textContent=message.message}if(message.type==='output'){updateAssistant(message.message,true)}if(message.type==='throughput'&&assistantMessage&&message.value.tokensPerSecond){assistantMessage.dataset.rate='≈ '+message.value.tokensPerSecond.toFixed(1)+' tok/s'}if(message.type==='error'){updateAssistant(message.message,true)}if(message.type==='recommendation'){models=message.models;document.getElementById('allocation').textContent=message.recommendation.model+' / '+message.recommendation.effort;document.getElementById('reasons').textContent=message.recommendation.reasons.join(' ');model.replaceChildren(...models.map(entry=>{const option=document.createElement('option');option.value=entry.model;option.textContent=entry.displayName+' ('+entry.model+')';return option}));model.value=message.recommendation.model;updateEfforts();effort.value=message.recommendation.effort;conversation.append(recommendation);setUiState('awaiting-approval','Review the recommendation before starting Codex.');recommendation.scrollIntoView({block:'end'});accept.focus()}if(message.type==='finished'){setUiState('idle','');assistantMessage=undefined;assistantText='';task.focus()}});setUiState('idle','');post({type:'ready'});${activityScript}</script></body></html>`;
+<section id="recommendation" class="recommendation" aria-label="Recommended Codex configuration"><p id="allocation" class="allocation"></p><p id="reasons" class="hint"></p><div class="actions"><button id="accept" class="button primary">Start Codex</button><button id="dismiss" class="button secondary">Stop sequence</button></div><details class="override-fields"><summary>Override model or effort</summary><label class="field" for="model">Override model</label><select id="model"></select><label class="field" for="effort">Effort</label><select id="effort"></select><div class="actions"><button id="override" class="button secondary">Start override</button></div></details></section>
+<script nonce="${nonce}">${markdownScript}const vscode=acquireVsCodeApi(),task=document.getElementById('task'),metadata=document.getElementById('metadata'),cancel=document.getElementById('cancel'),provider=document.getElementById('provider'),conversation=document.getElementById('conversation'),recommendation=document.getElementById('recommendation'),model=document.getElementById('model'),effort=document.getElementById('effort'),accept=document.getElementById('accept'),dismiss=document.getElementById('dismiss'),override=document.getElementById('override'),activity=document.getElementById('activity'),activityMessage=document.getElementById('activity-message'),spinner=document.getElementById('spinner');let models=[],assistantMessage,assistantText='',uiState='idle';function post(value){vscode.postMessage(value)}function addMessage(role,text){const message=document.createElement('div');message.className='message '+role;if(role==='assistant'){assistantText=text;renderMarkdown(message,text)}else message.textContent=text;conversation.append(message);message.scrollIntoView({block:'end'});return message}function restoreHistory(messages){conversation.replaceChildren();assistantMessage=undefined;assistantText='';for(const entry of messages)addMessage(entry.role,entry.text);assistantMessage=undefined;assistantText=''}function setUiState(state,message){uiState=state;const awaiting=state==='awaiting-approval',active=state==='starting'||state==='running'||state==='stopping',locked=state!=='idle';task.disabled=locked;document.getElementById('submit').disabled=locked||!task.value.trim();document.getElementById('submit').hidden=active;document.getElementById('newConversation').disabled=locked;metadata.disabled=locked;provider.disabled=locked;accept.disabled=!awaiting;if(typeof dismiss!=='undefined'&&dismiss)dismiss.disabled=!awaiting;override.disabled=!awaiting;model.disabled=!awaiting;effort.disabled=!awaiting;cancel.style.display=active?'block':'none';cancel.disabled=state==='stopping';cancel.textContent=state==='stopping'?'Stopping…':'Stop model';recommendation.style.display=awaiting?'block':'none';if(!awaiting)recommendation.querySelector('details').open=false;activity.hidden=state==='idle';spinner.hidden=awaiting;if(message)activityMessage.textContent=message}function updateAssistant(text,append){if(!assistantMessage){if(!append)return;assistantMessage=addMessage('assistant','')}const follow=conversation.scrollHeight-conversation.scrollTop-conversation.clientHeight<48;assistantText=append?assistantText+text:text;renderMarkdown(assistantMessage,assistantText);if(follow)conversation.scrollTop=conversation.scrollHeight}function updateEfforts(){const selected=models.find(entry=>entry.model===model.value);effort.replaceChildren(...(selected?.efforts??[]).map(value=>{const option=document.createElement('option');option.value=value;option.textContent=value;return option}))}function resizeTask(){task.style.height='auto';task.style.height=Math.min(task.scrollHeight,window.innerHeight*.25)+'px'}function submit(){const value=task.value.trim();if(!value||uiState!=='idle')return;addMessage('user',value);assistantMessage=addMessage('assistant','Checking Codex…');task.value='';resizeTask();setUiState('analysing','Checking Codex and selecting a configuration…');post({type:'submit',task:value,includeMetadata:metadata.checked})}document.getElementById('submit').addEventListener('click',submit);task.addEventListener('input',()=>{resizeTask();document.getElementById('submit').disabled=uiState!=='idle'||!task.value.trim()});window.addEventListener('resize',resizeTask);task.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing&&!task.disabled){event.preventDefault();submit()}});document.getElementById('newConversation').addEventListener('click',()=>post({type:'new-conversation'}));cancel.addEventListener('click',()=>{if(cancel.disabled)return;setUiState('stopping','Stopping the model… Waiting for Codex to confirm.');post({type:'cancel'})});provider.addEventListener('change',()=>post({type:'routing-provider',provider:provider.value}));model.addEventListener('change',updateEfforts);accept.addEventListener('click',()=>{setUiState('starting','Starting Codex with the recommended configuration…');post({type:'selection',useRecommendation:true,model:'',effort:''})});dismiss?.addEventListener('click',()=>{setUiState('analysing','Stopping the planned sequence…');post({type:'dismiss-selection'})});override.addEventListener('click',()=>{setUiState('starting','Starting Codex with your override…');post({type:'selection',useRecommendation:false,model:model.value,effort:effort.value})});window.addEventListener('message',event=>{const message=event.data;if(message.type==='conversation-history')restoreHistory(message.messages);if(message.type==='conversation-reset'){document.body.append(recommendation);recommendation.style.display='none';conversation.replaceChildren();assistantMessage=undefined;assistantText='';task.focus()}if(message.type==='routing-provider'){provider.value=message.provider}if(message.type==='started'){setUiState('analysing','Checking Codex and selecting a configuration…')}if(message.type==='activity'){setUiState(message.state,message.message)}if(message.type==='progress'){updateAssistant(message.message,false);if(uiState!=='awaiting-approval')activityMessage.textContent=message.message}if(message.type==='output'){updateAssistant(message.message,true)}if(message.type==='throughput'&&assistantMessage&&message.value.tokensPerSecond){assistantMessage.dataset.rate='≈ '+message.value.tokensPerSecond.toFixed(1)+' tok/s'}if(message.type==='error'){updateAssistant(message.message,true)}if(message.type==='recommendation'){models=message.models;document.getElementById('allocation').textContent=message.recommendation.model+' / '+message.recommendation.effort;document.getElementById('reasons').textContent=message.recommendation.reasons.join(' ');model.replaceChildren(...models.map(entry=>{const option=document.createElement('option');option.value=entry.model;option.textContent=entry.displayName+' ('+entry.model+')';return option}));model.value=message.recommendation.model;updateEfforts();effort.value=message.recommendation.effort;conversation.append(recommendation);setUiState('awaiting-approval','Review the recommendation before starting Codex.');recommendation.scrollIntoView({block:'end'});accept.focus()}if(message.type==='finished'){setUiState('idle','');assistantMessage=undefined;assistantText='';task.focus()}});setUiState('idle','');post({type:'ready'});${activityScript}</script></body></html>`;
 }

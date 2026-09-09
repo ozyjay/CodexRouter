@@ -2,6 +2,7 @@ import { CodexModel, MODELDECK_POLICY_VERSION, ProviderFallback, RoutingInput, R
 import { SimulationProfile } from "./evaluation";
 import { fallbackRoute, isValidRecommendation } from "./routing";
 import { CLASSIFIER_SCHEMA, classifierValidationIssues, normaliseClassifierRisk } from "./classifierSchema";
+import { TURN_PLAN_SCHEMA, TurnPlanCandidate, turnPlanValidationIssues } from "./orchestration";
 
 export interface ModelDeckConfig {
   baseUrl: string;
@@ -167,6 +168,43 @@ export class ModelDeckProvider {
     };
   }
 
+  async planTurns(input: RoutingInput, models: readonly CodexModel[], recommendation: RoutingRecommendation): Promise<TurnPlanCandidate> {
+    const discovered = await this.discoverReadyModels();
+    const model = this.config.routerModel || discovered[0]?.id;
+    if (!model) throw new Error("ModelDeck did not report a ready local turn planner.");
+    if (!discovered.some((candidate) => candidate.id === model)) throw new Error("The configured ModelDeck turn planner is not ready.");
+
+    const response = await this.request("chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        temperature: 0,
+        max_tokens: 512,
+        messages: [
+          { role: "system", content: TURN_PLANNER_PROMPT },
+          { role: "user", content: JSON.stringify({
+            ...input,
+            initialRecommendation: { model: recommendation.recommendedModel, effort: recommendation.recommendedEffort },
+            availableModels: classifierCatalogue(models),
+            responseSchema: TURN_PLAN_SCHEMA
+          }) }
+        ]
+      })
+    });
+    const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const content = payload.choices?.[0]?.message?.content;
+    if (typeof content !== "string") throw new ModelDeckClassifierError("no-completion-content");
+    let candidate: unknown;
+    try { candidate = parseClassifierJson(content); } catch {
+      throw new ModelDeckClassifierError("json-parse-failed", content);
+    }
+    const issues = turnPlanValidationIssues(candidate, models);
+    if (issues.length) throw new ModelDeckClassifierError("contract-validation-failed", content, issues);
+    return candidate as TurnPlanCandidate;
+  }
+
   async selectSimulationProfile(input: SimulationSelectorInput): Promise<SimulationSelectorRecommendation> {
     const discovered = await this.discoverReadyModels();
     const model = this.config.routerModel || discovered[0]?.id;
@@ -266,7 +304,7 @@ export function classifyModelDeckFailure(error: unknown): ProviderFallback {
   if (error instanceof ModelDeckClassifierError) return "malformed";
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   if (message.includes("timed out")) return "timeout";
-  if (message.includes("no ready") || message.includes("not ready") || message.includes("a ready local routing model")) return "no-ready-model";
+  if (message.includes("no ready") || message.includes("not ready") || message.includes("did not report a ready")) return "no-ready-model";
   if (message.includes("invalid") || message.includes("malformed") || message.includes("json") || message.includes("content")) return "malformed";
   if (message.includes("unsupported") || message.includes("unavailable model")) return "unsupported-allocation";
   return "unavailable";
@@ -420,6 +458,11 @@ simulationProfile: sim-small|sim-balanced|sim-strong;
 confidence: number from 0 to 1;
 rationale: a concise explanation of at most 160 characters.
 Choose sim-small for focused, low-risk work; sim-balanced for ordinary bounded changes; sim-strong for ambiguous, broad, destructive, security-sensitive, or high-risk work. You select a declared deterministic scenario only. Do not propose commands, patches, source code, paths, credentials, Markdown, or prose outside the JSON object.`;
+
+const TURN_PLANNER_PROMPT = `You are a local Codex turn planner. Decide whether the supplied software task should use one turn or a short sequential sequence. Return only one JSON object matching responseSchema.
+Use exactly one implementation turn for small, explicit or tightly coupled tasks. Use two or three turns only when separate exploration, implementation or independent review materially improves a broad, ambiguous, consequential or high-verification task. Sequential plans must be one of: exploration then implementation; implementation then review; or exploration then implementation then review. Never repeat or reorder phases.
+Choose every turn's model exactly from availableModels[].model and its effort from that model's supportedReasoningEfforts. The initialRecommendation is the safe default for a single turn. A cheap exploration turn may use a smaller allocation, ordinary implementation may use a balanced allocation, and consequential review should use a stronger allocation. Do not weaken security-sensitive, destructive, migration, concurrency, distributed-systems, credentials or data-integrity work.
+You provide routing advice only. Do not include task rewrites, source code, commands, paths, credentials, Markdown or prose outside the JSON object. Reasons must be concise observations about why multiple turns are or are not justified.`;
 
 const PROXY_CANDIDATE_PROMPT = `You are a constrained local proxy candidate generator. Return only one JSON object with exactly this field:
 patches: an array of one to the supplied maximum number of patch objects.

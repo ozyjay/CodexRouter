@@ -118,6 +118,22 @@ export interface AllocationSelection {
   overridden: boolean;
 }
 
+export type TurnPhase = "exploration" | "implementation" | "review";
+
+export interface PlannedTurn {
+  phase: TurnPhase;
+  recommendation: RoutingRecommendation;
+}
+
+export interface TurnPlan {
+  strategy: "single-turn" | "sequential-turns";
+  turns: PlannedTurn[];
+  reasons: string[];
+  source: RoutingSource;
+  classifierModel?: string;
+  providerFallback?: ProviderFallback;
+}
+
 export interface OutcomeRecord {
   schemaVersion: 2;
   recordId: string;

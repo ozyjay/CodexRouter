@@ -3,6 +3,7 @@ import test from "node:test";
 import { CodexModel } from "../src/contracts";
 import { CLASSIFIER_SCHEMA } from "../src/classifierSchema";
 import { ModelDeckClassifierError, ModelDeckProvider, ProxyCandidateError, assertLoopbackUrl, assertModelDeckModelId, classifyModelDeckFailure, modelDeckFailureDiagnostic, modelDeckRawFailureResponse } from "../src/modelDeck";
+import { fallbackRoute } from "../src/routing";
 
 test("evaluation diagnostics retain malformed proxy responses before rejection without headers", async () => {
   const originalFetch = globalThis.fetch;
@@ -128,6 +129,48 @@ test("ModelDeck classifier receives metadata but never execution source", async 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("ModelDeck turn planner chooses a bounded per-turn allocation from the live catalogue", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody = "";
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith("/models")) return new Response(JSON.stringify({ data: [{ id: "local-router", ready: true }] }));
+    requestBody = typeof init?.body === "string" ? init.body : "";
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+      strategy: "sequential-turns",
+      turns: [
+        { phase: "exploration", model: "gpt-current", effort: "low" },
+        { phase: "implementation", model: "gpt-current", effort: "high" }
+      ],
+      reasons: ["The task needs discovery before implementation."]
+    }) } }] }));
+  }) as typeof fetch;
+  try {
+    const models: CodexModel[] = [{ id: "current", model: "gpt-current", displayName: "Current", description: "", hidden: false, supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "high" }], defaultReasoningEffort: "high", isDefault: true }];
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
+    const input = { task: "Implement a broad parser change.", metadata: { languageId: "typescript" } };
+    const plan = await provider.planTurns(input, models, { ...fallbackRoute(input), recommendedModel: "gpt-current", recommendedEffort: "high" });
+    assert.equal(plan.turns.length, 2);
+    assert.match(requestBody, /initialRecommendation/);
+    assert.match(requestBody, /responseSchema/);
+    assert.doesNotMatch(requestBody, /source excerpt/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("ModelDeck turn planner rejects unsupported or unordered plans", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (url) => new Response(JSON.stringify(String(url).endsWith("/models")
+    ? { data: [{ id: "local-router", ready: true }] }
+    : { choices: [{ message: { content: JSON.stringify({ strategy: "sequential-turns", turns: [{ phase: "review", model: "missing", effort: "ultra" }, { phase: "implementation", model: "missing", effort: "ultra" }], reasons: ["Invalid."] }) } }] }))) as typeof fetch;
+  try {
+    const models: CodexModel[] = [{ id: "current", model: "gpt-current", displayName: "Current", description: "", hidden: false, supportedReasoningEfforts: [{ reasoningEffort: "low" }], defaultReasoningEffort: "low", isDefault: true }];
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
+    await assert.rejects(provider.planTurns({ task: "Task" }, models, { ...fallbackRoute({ task: "Task" }), recommendedModel: "gpt-current", recommendedEffort: "low" }), (error: unknown) => {
+      assert.match(modelDeckFailureDiagnostic(error) ?? "", /turn-allocation/);
+      return true;
+    });
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("classifier normalises the observed risk alias and reports invalid field names", async () => {

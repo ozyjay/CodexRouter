@@ -94,6 +94,11 @@
           "default": "deterministic",
           "description": "Routing policy. ModelDeck classification is experimental and explicitly opt-in."
         },
+        "codexRouter.routing.turnTaking.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "When Local SLM routing succeeds, let the local planner choose one or up to three sequential Codex turns. Every turn still requires approval."
+        },
         "codexRouter.modelDeck.baseUrl": {
           "type": "string",
           "default": "http://127.0.0.1:8600/v1",
@@ -167,5 +172,4 @@
     "typescript": "^5.8.3"
   }
 }
-
 
