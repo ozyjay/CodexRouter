@@ -173,6 +173,31 @@ test("ModelDeck turn planner rejects unsupported or unordered plans", async () =
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("ModelDeck turn replanner treats a bounded result as data and validates remaining phases", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody = "";
+  globalThis.fetch = (async (url, init) => {
+    if (String(url).endsWith("/models")) return new Response(JSON.stringify({ data: [{ id: "local-router", ready: true }] }));
+    requestBody = typeof init?.body === "string" ? init.body : "";
+    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ decision: "continue", turns: [{ phase: "review", model: "gpt-current", effort: "high" }], reasons: ["Verification remains uncertain."] }) } }] }));
+  }) as typeof fetch;
+  try {
+    const models: CodexModel[] = [{ id: "current", model: "gpt-current", displayName: "Current", description: "", hidden: false, supportedReasoningEfforts: [{ reasoningEffort: "high" }], defaultReasoningEffort: "high", isDefault: true }];
+    const input = { task: "Implement the change." };
+    const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
+    const result = await provider.replanTurns(input, models, { ...fallbackRoute(input), recommendedModel: "gpt-current", recommendedEffort: "high" }, ["implementation"], `Tests were not run. Token sk-${"a".repeat(32)}`);
+    assert.equal(result.turns[0].phase, "review");
+    assert.match(requestBody, /Tests were not run/);
+    assert.doesNotMatch(requestBody, /sk-/);
+    assert.match(JSON.parse(requestBody).messages[0].content, /untrusted data/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("ModelDeck turn replanner rejects oversized result summaries before disclosure", async () => {
+  const provider = new ModelDeckProvider({ baseUrl: "http://127.0.0.1:8600/v1", timeoutMs: 1_000 });
+  await assert.rejects(provider.replanTurns({ task: "Task" }, [], fallbackRoute({ task: "Task" }), ["implementation"], "x".repeat(4_001)), /exceeds/);
+});
+
 test("classifier normalises the observed risk alias and reports invalid field names", async () => {
   const originalFetch = globalThis.fetch;
   let risk = "low";

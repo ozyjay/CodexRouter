@@ -99,6 +99,11 @@
           "default": true,
           "description": "When Local SLM routing succeeds, let the local planner choose one or up to three sequential Codex turns. Every turn still requires approval."
         },
+        "codexRouter.routing.turnTaking.adaptiveReplanning.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "After each completed Local SLM phase, send at most 4,000 characters of best-effort credential-filtered Codex output to the loopback planner so it can stop or revise remaining turns."
+        },
         "codexRouter.modelDeck.baseUrl": {
           "type": "string",
           "default": "http://127.0.0.1:8600/v1",
@@ -172,4 +177,3 @@
     "typescript": "^5.8.3"
   }
 }
-

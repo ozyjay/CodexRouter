@@ -7,6 +7,7 @@ test("extension configuration keeps deterministic routing and analytics-safe def
   const properties = manifest.contributes.configuration.properties;
   assert.equal(properties["codexRouter.routing.provider"].default, "deterministic");
   assert.equal(properties["codexRouter.routing.turnTaking.enabled"].default, true);
+  assert.equal(properties["codexRouter.routing.turnTaking.adaptiveReplanning.enabled"].default, false);
   assert.equal(properties["codexRouter.analytics.enabled"].default, false);
   assert.equal(properties["codexRouter.diagnostics.developmentLogs"].default, false);
   assert.equal(properties["codexRouter.modelDeck.proxyModel"].default, "codex-router-proxy-balanced");

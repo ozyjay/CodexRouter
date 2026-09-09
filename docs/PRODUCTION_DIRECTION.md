@@ -67,6 +67,8 @@ Selecting **Use recommendation** starts a turn in the sidebar's current App Serv
 
 With the experimental Local SLM provider, the recommendation also includes a bounded plan. A single request may use one implementation turn or an ordered sequence of exploration, implementation and review turns. Every phase is a separate App Server turn in the same thread, with fixed router-owned phase instructions and explicit approval or override before it starts. Planner failure falls back to the validated single-turn recommendation; no deterministic policy task is expanded into multiple turns.
 
+An additional setting opts into output-adaptive replanning. It sends at most 4,000 characters of best-effort credential-filtered assistant response text to the literal-loopback planner after a phase. The replanner may stop or replace only the remaining ordered phases; its output cannot contain execution instructions and is validated and guarded like the initial plan. Oversized results are withheld and replan failure retains the previous plan.
+
 ### Secondary entry points
 
 - **Codex Router: New Routed Task** is the universal keyboard/command-palette entry point.
@@ -109,6 +111,8 @@ Configure the extension with that public model ID. The routing model must be a s
 Supply the current App Server model IDs and their supported reasoning efforts in every classifier request. Validate the resulting pair against that catalogue and retain explicit rejection reasons in operational diagnostics. Opt-in development logs live in the extension host's log directory and contain filtered sensitive content; the webview never receives these logs.
 
 Turn planning uses the same compact task and catalogue context. It can select only the fixed exploration, implementation and review phases, never free-form execution instructions, and is limited to three sequential turns. Safety guardrails are applied independently to every phase allocation.
+
+Adaptive replanning crosses an additional disclosure boundary and is therefore off by default. Ordinary diagnostics record only phase, allocation, decision and result length—not result content. Development logs may retain the filtered request only when their existing sensitive logging option is explicitly enabled.
 
 The optional selected-code workflow uses a separate coding-capable ModelDeck route:
 

@@ -1,8 +1,15 @@
-import { CodexModel, RoutingInput, RoutingRecommendation, TurnPhase, TurnPlan } from "./contracts";
+import { CodexModel, PlannedTurn, RoutingInput, RoutingRecommendation, TurnPhase, TurnPlan } from "./contracts";
 import { applyGuardrails } from "./routing";
+import { redactDebugText } from "./developmentLog";
 
 export interface TurnPlanCandidate {
   strategy: "single-turn" | "sequential-turns";
+  turns: Array<{ phase: TurnPhase; model: string; effort: string }>;
+  reasons: string[];
+}
+
+export interface TurnReplanCandidate {
+  decision: "complete" | "continue";
   turns: Array<{ phase: TurnPhase; model: string; effort: string }>;
   reasons: string[];
 }
@@ -36,6 +43,17 @@ export const TURN_PLAN_SCHEMA = {
       maxItems: 3,
       items: { type: "string", minLength: 1, maxLength: 240, pattern: "^[^\\r\\n]+$" }
     }
+  }
+} as const;
+
+export const TURN_REPLAN_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["decision", "turns", "reasons"],
+  properties: {
+    decision: { type: "string", enum: ["complete", "continue"] },
+    turns: { ...TURN_PLAN_SCHEMA.properties.turns, minItems: 0 },
+    reasons: TURN_PLAN_SCHEMA.properties.reasons
   }
 } as const;
 
@@ -92,6 +110,52 @@ export function buildTurnPlan(candidate: TurnPlanCandidate, input: RoutingInput,
   };
 }
 
+export function turnReplanValidationIssues(value: unknown, models: readonly CodexModel[], completedPhases: readonly TurnPhase[]): string[] {
+  if (!isRecord(value)) return ["object"];
+  const issues: string[] = [];
+  if (!hasExactKeys(value, ["decision", "turns", "reasons"])) issues.push("unexpected-fields");
+  if (value.decision !== "complete" && value.decision !== "continue") issues.push("decision");
+  if (!Array.isArray(value.reasons) || value.reasons.length < 1 || value.reasons.length > 3 || !value.reasons.every(isBoundedLine)) issues.push("reasons");
+  if (!Array.isArray(value.turns)) return [...issues, "turns"];
+  const turns = value.turns;
+  const remainingCapacity = 3 - completedPhases.length;
+  if (turns.length > remainingCapacity) issues.push("turns");
+  if ((value.decision === "complete" && turns.length !== 0) || (value.decision === "continue" && turns.length < 1)) issues.push("decision-turns");
+
+  const phases: TurnPhase[] = [];
+  for (const turn of turns) {
+    if (!isRecord(turn) || !hasExactKeys(turn, ["phase", "model", "effort"])) {
+      issues.push("turn-fields");
+      continue;
+    }
+    if (!PHASE_ORDER.includes(turn.phase as TurnPhase)) issues.push("turn-phase");
+    else phases.push(turn.phase as TurnPhase);
+    if (typeof turn.model !== "string" || typeof turn.effort !== "string" || !supportsAllocation(turn.model, turn.effort, models)) issues.push("turn-allocation");
+  }
+
+  const lastCompleted = completedPhases.at(-1);
+  const minimumIndex = lastCompleted ? PHASE_ORDER.indexOf(lastCompleted) : -1;
+  if (new Set(phases).size !== phases.length || phases.some((phase, index) => PHASE_ORDER.indexOf(phase) <= (index === 0 ? minimumIndex : PHASE_ORDER.indexOf(phases[index - 1])))) issues.push("phase-order");
+  const implementationCompleted = completedPhases.includes("implementation");
+  if (value.decision === "complete" && !implementationCompleted) issues.push("implementation-required");
+  if (value.decision === "continue" && !implementationCompleted && !phases.includes("implementation")) issues.push("implementation-required");
+  return [...new Set(issues)];
+}
+
+export function buildReplannedTurns(candidate: TurnReplanCandidate, input: RoutingInput, models: CodexModel[], base: RoutingRecommendation, completedPhases: readonly TurnPhase[]): PlannedTurn[] {
+  const issues = turnReplanValidationIssues(candidate, models, completedPhases);
+  if (issues.length) throw new Error(`Local turn replan is invalid: ${issues.join(", ")}.`);
+  return candidate.turns.map((turn) => ({
+    phase: turn.phase,
+    recommendation: applyGuardrails({
+      ...base,
+      recommendedModel: turn.model,
+      recommendedEffort: turn.effort,
+      reasons: [`${phaseLabel(turn.phase)} turn selected after local replanning.`, ...candidate.reasons].slice(0, 3)
+    }, input, models)
+  }));
+}
+
 export function singleTurnPlan(recommendation: RoutingRecommendation, providerFallback?: TurnPlan["providerFallback"]): TurnPlan {
   return {
     strategy: "single-turn",
@@ -115,6 +179,25 @@ export function phasePrompt(phase: TurnPhase, turnNumber: number, turnCount: num
 
 export function phaseLabel(phase: TurnPhase): string {
   return phase === "exploration" ? "Exploration" : phase === "implementation" ? "Implementation" : "Review";
+}
+
+export class TurnResultSummaryCollector {
+  private content = "";
+  private oversized = false;
+
+  push(delta: string): void {
+    if (this.oversized) return;
+    this.content += delta;
+    if (this.content.length > 65_536) {
+      this.content = "";
+      this.oversized = true;
+    }
+  }
+
+  summary(): string {
+    if (this.oversized) return "[Assistant result withheld because it exceeded the local replanning limit.]";
+    return redactDebugText(this.content).slice(-4_000);
+  }
 }
 
 function isBoundedLine(value: unknown): value is string {

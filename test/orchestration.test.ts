@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CodexModel } from "../src/contracts";
-import { buildTurnPlan, phasePrompt, singleTurnPlan, turnPlanValidationIssues } from "../src/orchestration";
+import { TurnResultSummaryCollector, buildReplannedTurns, buildTurnPlan, phasePrompt, singleTurnPlan, turnPlanValidationIssues, turnReplanValidationIssues } from "../src/orchestration";
 import { fallbackRoute } from "../src/routing";
 
 const models: CodexModel[] = [
@@ -55,4 +55,24 @@ test("single-turn fallback preserves the routed recommendation", () => {
   const recommendation = fallbackRoute({ task: "Fix one typo." });
   assert.equal(singleTurnPlan(recommendation, "malformed").turns[0].recommendation, recommendation);
   assert.equal(singleTurnPlan(recommendation, "malformed").providerFallback, "malformed");
+});
+
+test("adaptive replans can stop after implementation or add only later phases", () => {
+  assert.deepEqual(turnReplanValidationIssues({ decision: "complete", turns: [], reasons: ["Implementation completed with verification."] }, models, ["implementation"]), []);
+  const review = { decision: "continue" as const, turns: [{ phase: "review" as const, model: "gpt-5.6-sol", effort: "high" }], reasons: ["Verification remains uncertain."] };
+  assert.deepEqual(turnReplanValidationIssues(review, models, ["implementation"]), []);
+  assert.ok(turnReplanValidationIssues({ ...review, turns: [{ phase: "exploration", model: "gpt-5.6-luna", effort: "low" }] }, models, ["implementation"]).includes("phase-order"));
+  assert.ok(turnReplanValidationIssues({ decision: "complete", turns: [], reasons: ["Too early."] }, models, ["exploration"]).includes("implementation-required"));
+  const base = { ...fallbackRoute({ task: "Implement a parser." }), source: "local-model" as const };
+  assert.equal(buildReplannedTurns(review, { task: "Implement a parser." }, models, base, ["implementation"])[0].phase, "review");
+});
+
+test("adaptive result summaries are bounded and redact common credentials", () => {
+  const collector = new TurnResultSummaryCollector();
+  collector.push(`Finished with token sk-${"a".repeat(32)} and verification passed.`);
+  assert.doesNotMatch(collector.summary(), /sk-/);
+  assert.match(collector.summary(), /REDACTED TOKEN/);
+  const oversized = new TurnResultSummaryCollector();
+  oversized.push("x".repeat(65_537));
+  assert.match(oversized.summary(), /withheld/);
 });

@@ -24,7 +24,7 @@ The evidence-first command milestone now supplies the prerequisite product basel
 - an explicitly confirmed selected-code ModelDeck proxy can produce a strict advisory patch preview for optional independent Codex review.
 - an experimental bounded turn planner can choose one turn or an ordered exploration, implementation and review sequence, with live-catalogue validation, per-phase guardrails and approval before every turn.
 
-Matched live evaluation, output-adaptive replanning, per-phase outcome attribution, subagent allocation, and automatic policy learning remain future work. Nothing in the current milestone is evidence that ModelDeck, a model tier, or a multi-turn strategy is superior.
+Matched live evaluation, per-phase outcome attribution, subagent allocation, and automatic policy learning remain future work. A first output-adaptive replanning slice is implemented but unevaluated. Nothing in the current milestone is evidence that ModelDeck, a model tier, or a multi-turn strategy is superior.
 
 ## Local routing-provider choice
 
@@ -141,6 +141,8 @@ The experimental ModelDeck path now represents a bounded execution strategy as w
 
 The implementation accepts only one implementation turn or two to three monotonically ordered phases that include implementation. It validates every allocation against the live App Server catalogue, applies deterministic safety guardrails to each phase, and falls back to one validated turn on any planning failure. The SLM cannot write phase prompts: router-owned deterministic instructions are used. Turns share an App Server thread but remain separately approved. Subagents and parallel execution are not part of this slice.
 
+Optional adaptive replanning runs after a completed phase. It receives the original compact routing input, completed phase names, the safe default allocation, the live catalogue, and at most 4,000 characters of best-effort credential-filtered assistant response text. It may mark the task complete or replace only later phases; implementation cannot be skipped, phases cannot repeat, and three total turns remains the hard limit. Result text is treated as untrusted data, is never copied into the replanner's reasons, and is excluded from ordinary diagnostics and outcomes. Failure retains the earlier plan.
+
 ## Deterministic decision rules
 
 Before a router proposes multiple phases or subagents, it must establish that:
@@ -179,7 +181,7 @@ No outcome record may contain task text, source code, complete generated output,
 8. Add and evaluate Ollama and LM Studio presets, retaining only providers that meet the same privacy and reliability contract.
 9. Extend the implemented App Server submission, cancellation, approval, and per-turn override flow only through verified version-matched interfaces.
 10. Maintain the implemented bounded phase-aware sequential routing; add subagent assignment only where the supported interface is confirmed.
-11. Add per-phase outcome attribution and output-adaptive recommendations.
+11. Add per-phase outcome attribution and evaluate the implemented output-adaptive recommendations.
 12. Consider automatic routing only after advisory recommendations are demonstrably reliable.
 
 ## Updated success criterion
